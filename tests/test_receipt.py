@@ -339,6 +339,67 @@ class TestRun(unittest.TestCase):
         self.assertIn("garbage", result["stdout"])
 
 
+class TestSchema(unittest.TestCase):
+    """Validates real receipt output against schema/receipt.schema.json --
+    a schema file nobody ever validates against is a promise, not a
+    contract. Needs the `jsonschema` package (test-only -- receipt itself
+    stays zero-dependency); skips cleanly if it isn't installed rather than
+    failing the whole suite over a dev-only tool.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        try:
+            import jsonschema  # noqa: F401
+        except ImportError:
+            self.skipTest("jsonschema not installed -- pip install jsonschema to run this test")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _schema(self) -> dict:
+        schema_path = pathlib.Path(__file__).parent.parent / "schema" / "receipt.schema.json"
+        return json.loads(schema_path.read_text())
+
+    def test_a_real_pass_receipt_validates_against_the_schema(self):
+        import jsonschema
+        from receipt.evidence import write
+
+        result = run(task="write output.txt",
+                      cmd=["python3", "-c", "open('output.txt', 'w').write('x')"],
+                      watch_dir=self.tmp.name, declared_paths=["output.txt"])
+        path = write(result, pathlib.Path(self.tmp.name) / "receipts")
+        jsonschema.validate(json.loads(path.read_text()), self._schema())
+
+    def test_a_real_fail_receipt_with_a_rename_validates_against_the_schema(self):
+        import jsonschema
+        from receipt.evidence import write
+
+        (pathlib.Path(self.tmp.name) / "a.txt").write_text("x")
+        result = run(task="rename", cmd=["python3", "-c", "import os; os.rename('a.txt', 'b.txt')"],
+                      watch_dir=self.tmp.name, declared_paths=["a.txt"])
+        path = write(result, pathlib.Path(self.tmp.name) / "receipts")
+        jsonschema.validate(json.loads(path.read_text()), self._schema())
+
+    def test_a_real_launch_failure_receipt_validates_against_the_schema(self):
+        import jsonschema
+        from receipt.evidence import write
+
+        result = run(task="x", cmd=["definitely_not_a_real_binary_xyz"],
+                      watch_dir=self.tmp.name, declared_paths=[])
+        path = write(result, pathlib.Path(self.tmp.name) / "receipts")
+        jsonschema.validate(json.loads(path.read_text()), self._schema())
+
+    def test_an_unverified_receipt_with_no_declared_scope_validates(self):
+        import jsonschema
+        from receipt.evidence import write
+
+        result = run(task="x", cmd=["python3", "-c", "pass"],
+                      watch_dir=self.tmp.name, declared_paths=None)
+        path = write(result, pathlib.Path(self.tmp.name) / "receipts")
+        jsonschema.validate(json.loads(path.read_text()), self._schema())
+
+
 class TestEvidence(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

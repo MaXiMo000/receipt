@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MaXiMo000/receipt/schema/receipt.schema.json",
+  "title": "receipt evidence record",
+  "description": "The record written by receipt/evidence.py:write() to receipts/<timestamp>-<random>.json. schema_version bumps only on a breaking change (a field renamed or removed) -- a new field being added is not breaking and does not bump it.",
+  "type": "object",
+  "required": ["schema_version", "receipt", "sha256", "written_at"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "sha256": {
+      "type": "string",
+      "description": "sha256 hex digest of `receipt`, serialized as json.dumps(receipt, indent=2, sort_keys=True, default=str) -- recompute the same way to verify the record wasn't edited after being written.",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "written_at": {
+      "type": "number",
+      "description": "Unix timestamp (time.time()) of when this record was written."
+    },
+    "receipt": {
+      "type": "object",
+      "required": [
+        "task", "command", "watch_dir", "exit_code", "seconds",
+        "stdout", "stderr", "declared_paths", "changes",
+        "unexpected", "status", "detail"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "task": {
+          "type": "string",
+          "description": "The --task value: what the command was asked to do, in the caller's own words."
+        },
+        "command": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "The argv the command was run with, redacted (receipt/redact.py) -- secret-shaped substrings are replaced with [REDACTED]."
+        },
+        "watch_dir": { "type": "string" },
+        "exit_code": {
+          "type": ["integer", "null"],
+          "description": "null only when the command never launched at all (see status/detail)."
+        },
+        "seconds": { "type": "number", "minimum": 0 },
+        "stdout": { "type": "string", "description": "Redacted, same as command." },
+        "stderr": { "type": "string", "description": "Redacted, same as command." },
+        "declared_paths": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "description": "null means no scope was declared for this run (status is then always unverified). Entries may be exact relative paths or fnmatch glob patterns."
+        },
+        "changes": {
+          "type": "object",
+          "required": ["added", "modified", "removed", "renamed", "mode_changed"],
+          "additionalProperties": false,
+          "properties": {
+            "added": { "type": "array", "items": { "type": "string" } },
+            "modified": { "type": "array", "items": { "type": "string" } },
+            "removed": { "type": "array", "items": { "type": "string" } },
+            "renamed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["from", "to"],
+                "additionalProperties": false,
+                "properties": {
+                  "from": { "type": "string" },
+                  "to": { "type": "string" }
+                }
+              },
+              "description": "A removed path and an added path sharing an identical content hash, paired instead of reported as an unrelated delete + create."
+            },
+            "mode_changed": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Paths whose permission bits changed with byte-identical content. A file whose content also changed appears in `modified`, not here."
+            }
+          }
+        },
+        "unexpected": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Touched paths not covered by declared_paths -- always [] when status is pass or unverified."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pass", "fail", "unverified"],
+          "description": "pass: touched only what was declared. fail: touched something outside the declared scope, or the command never launched. unverified: no scope was declared for this run -- a legitimate audit-logging mode, not a degraded result."
+        },
+        "detail": {
+          "type": "string",
+          "description": "Human-readable summary of the verdict; the only field with launch-failure detail (\"could not launch the command: ...\") when exit_code is null."
+        }
+      }
+    }
+  }
+}
