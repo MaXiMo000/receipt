@@ -32,7 +32,23 @@ def run(task: str, cmd: list[str], watch_dir: str = ".",
     after = snapshot(watch_dir)
 
     changes = diff_snapshots(before, after)
-    touched = sorted(set(changes["added"]) | set(changes["modified"]) | set(changes["removed"]))
+    renamed_endpoints = {r["from"] for r in changes["renamed"]} | {r["to"] for r in changes["renamed"]}
+    touched = sorted(set(changes["added"]) | set(changes["modified"]) | set(changes["removed"])
+                      | renamed_endpoints | set(changes["mode_changed"]))
+
+    rename_from_by_to = {r["to"]: r["from"] for r in changes["renamed"]}
+    mode_only_changed = set(changes["mode_changed"])
+
+    def _annotate(p: str) -> str:
+        if p in rename_from_by_to:
+            # Name a renamed file's origin too -- "touched b.txt" alone
+            # hides that it's actually the declared a.txt under a new
+            # name, which is exactly the context someone needs to see
+            # this isn't an undeclared *new* file appearing from nowhere.
+            return f"{p} (renamed from {rename_from_by_to[p]})"
+        if p in mode_only_changed:
+            return f"{p} (permissions changed, content unchanged)"
+        return p
 
     if declared_paths is None:
         status = model.UNVERIFIED
@@ -43,7 +59,7 @@ def run(task: str, cmd: list[str], watch_dir: str = ".",
         unexpected = [p for p in touched if p not in declared]
         if unexpected:
             status = model.FAIL
-            detail = f"touched {len(unexpected)} undeclared file(s): {', '.join(unexpected)}"
+            detail = f"touched {len(unexpected)} undeclared file(s): {', '.join(_annotate(p) for p in unexpected)}"
         else:
             status = model.PASS
             detail = f"touched only what was declared ({len(touched)} file(s))"

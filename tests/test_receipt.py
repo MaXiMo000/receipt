@@ -21,21 +21,88 @@ from receipt.redact import redact
 from receipt.snapshot import diff, snapshot
 
 
+def _entry(content_hash: str, mode: int = 0o644) -> dict:
+    """A snapshot entry, for hand-built before/after fixtures in tests
+    below -- real snapshots come from snapshot(), this just matches its
+    {"hash", "mode"} shape without needing a real file on disk."""
+    return {"hash": content_hash, "mode": mode}
+
+
 class TestSnapshot(unittest.TestCase):
     def test_diff_finds_added_modified_removed(self):
-        before = {"a.txt": "hash1", "b.txt": "hash2"}
-        after = {"a.txt": "hash1-changed", "c.txt": "hash3"}
+        before = {"a.txt": _entry("hash1"), "b.txt": _entry("hash2")}
+        after = {"a.txt": _entry("hash1-changed"), "c.txt": _entry("hash3")}
         result = diff(before, after)
         self.assertEqual(result["added"], ["c.txt"])
         self.assertEqual(result["modified"], ["a.txt"])
         self.assertEqual(result["removed"], ["b.txt"])
 
-    def test_snapshot_hashes_real_files(self):
+    def test_snapshot_hashes_real_files_and_records_their_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
-            (pathlib.Path(tmp) / "x.txt").write_text("hello")
+            path = pathlib.Path(tmp) / "x.txt"
+            path.write_text("hello")
+            path.chmod(0o644)
             result = snapshot(tmp)
             self.assertIn("x.txt", result)
-            self.assertEqual(len(result["x.txt"]), 64)  # sha256 hex digest length
+            self.assertEqual(len(result["x.txt"]["hash"]), 64)  # sha256 hex digest length
+            self.assertEqual(result["x.txt"]["mode"], 0o644)
+
+    def test_a_rename_is_reported_as_a_rename_not_delete_plus_create(self):
+        before = {"a.txt": _entry("samehash")}
+        after = {"b.txt": _entry("samehash")}
+        result = diff(before, after)
+        self.assertEqual(result["renamed"], [{"from": "a.txt", "to": "b.txt"}])
+        self.assertEqual(result["added"], [])
+        self.assertEqual(result["removed"], [])
+
+    def test_a_genuine_delete_plus_unrelated_create_is_not_mistaken_for_a_rename(self):
+        before = {"a.txt": _entry("hash-a")}
+        after = {"b.txt": _entry("hash-b")}  # different content -- not the same file moved
+        result = diff(before, after)
+        self.assertEqual(result["renamed"], [])
+        self.assertEqual(result["added"], ["b.txt"])
+        self.assertEqual(result["removed"], ["a.txt"])
+
+    def test_two_simultaneous_renames_with_identical_content_pair_deterministically(self):
+        before = {"a1.txt": _entry("dup"), "a2.txt": _entry("dup")}
+        after = {"b1.txt": _entry("dup"), "b2.txt": _entry("dup")}
+        result = diff(before, after)
+        self.assertEqual(
+            result["renamed"],
+            [{"from": "a1.txt", "to": "b1.txt"}, {"from": "a2.txt", "to": "b2.txt"}],
+        )
+
+    def test_a_modified_file_alongside_a_rename_is_still_reported_separately(self):
+        before = {"a.txt": _entry("h1"), "c.txt": _entry("h-old")}
+        after = {"b.txt": _entry("h1"), "c.txt": _entry("h-new")}
+        result = diff(before, after)
+        self.assertEqual(result["renamed"], [{"from": "a.txt", "to": "b.txt"}])
+        self.assertEqual(result["modified"], ["c.txt"])
+
+    def test_a_permission_only_change_is_reported_as_mode_changed_not_modified(self):
+        before = {"a.txt": _entry("same", mode=0o644)}
+        after = {"a.txt": _entry("same", mode=0o755)}
+        result = diff(before, after)
+        self.assertEqual(result["mode_changed"], ["a.txt"])
+        self.assertEqual(result["modified"], [])
+
+    def test_a_content_change_is_not_double_reported_in_mode_changed(self):
+        # If content changed too, `modified` already covers it -- mode_changed
+        # exists specifically for the content-identical case that would
+        # otherwise be silent, not as a second listing of every touched file.
+        before = {"a.txt": _entry("old", mode=0o644)}
+        after = {"a.txt": _entry("new", mode=0o755)}
+        result = diff(before, after)
+        self.assertEqual(result["modified"], ["a.txt"])
+        self.assertEqual(result["mode_changed"], [])
+
+    def test_snapshot_records_the_real_permission_bits_of_an_executable_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "script.sh"
+            path.write_text("#!/bin/sh\necho hi")
+            path.chmod(0o755)
+            result = snapshot(tmp)
+            self.assertEqual(result["script.sh"]["mode"], 0o755)
 
 
 class TestRedact(unittest.TestCase):
@@ -107,6 +174,61 @@ class TestRun(unittest.TestCase):
             declared_paths=None,
         )
         self.assertEqual(result["status"], UNVERIFIED)
+
+    def test_renaming_a_declared_file_to_another_declared_name_passes(self):
+        # The file must exist *before* run()'s first snapshot for a rename
+        # to be observable at all -- a file created and renamed within the
+        # same command never appears as anything but a plain new file.
+        (pathlib.Path(self.dir) / "output.txt").write_text("x")
+        result = run(
+            task="rename output.txt to final.txt",
+            cmd=["python3", "-c", "import os; os.rename('output.txt', 'final.txt')"],
+            watch_dir=self.dir,
+            declared_paths=["output.txt", "final.txt"],
+        )
+        self.assertEqual(result["status"], PASS)
+        self.assertEqual(result["changes"]["renamed"], [{"from": "output.txt", "to": "final.txt"}])
+
+    def test_renaming_to_an_undeclared_name_fails_and_names_the_origin(self):
+        # This is the false-positive the fix exists to prevent -- without
+        # rename detection this would report an undeclared *new* file with
+        # no indication it's actually the declared file, just moved.
+        (pathlib.Path(self.dir) / "output.txt").write_text("x")
+        result = run(
+            task="rename output.txt",
+            cmd=["python3", "-c", "import os; os.rename('output.txt', 'sneaky.txt')"],
+            watch_dir=self.dir,
+            declared_paths=["output.txt"],
+        )
+        self.assertEqual(result["status"], FAIL)
+        self.assertIn("sneaky.txt (renamed from output.txt)", result["detail"])
+
+    def test_chmod_on_an_undeclared_file_fails_where_it_used_to_be_invisible(self):
+        # This is the exact gap the audit flagged: a permission-only change
+        # (content byte-identical) previously produced 0 touched files and
+        # a silent PASS. A command flipping a file executable, or loosening
+        # permissions on something sensitive, should not be invisible.
+        (pathlib.Path(self.dir) / "secret.env").write_text("SECRET=x")
+        result = run(
+            task="do something unrelated",
+            cmd=["python3", "-c", "import os; os.chmod('secret.env', 0o777)"],
+            watch_dir=self.dir,
+            declared_paths=[],
+        )
+        self.assertEqual(result["status"], FAIL)
+        self.assertIn("secret.env (permissions changed, content unchanged)", result["detail"])
+        self.assertEqual(result["changes"]["mode_changed"], ["secret.env"])
+
+    def test_chmod_on_a_declared_file_passes(self):
+        (pathlib.Path(self.dir) / "build.sh").write_text("#!/bin/sh\necho hi")
+        result = run(
+            task="make build.sh executable",
+            cmd=["python3", "-c", "import os; os.chmod('build.sh', 0o755)"],
+            watch_dir=self.dir,
+            declared_paths=["build.sh"],
+        )
+        self.assertEqual(result["status"], PASS)
+        self.assertEqual(result["changes"]["mode_changed"], ["build.sh"])
 
     def test_command_that_touches_nothing_and_declares_nothing_passes(self):
         result = run(task="no-op", cmd=["python3", "-c", "pass"],
