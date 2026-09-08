@@ -7,6 +7,8 @@ PASS -- there was nothing to check it against.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import pathlib
 import sys
@@ -15,6 +17,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
+from receipt.cli import main as cli_main
 from receipt.core import run
 from receipt.model import FAIL, PASS, UNVERIFIED
 from receipt.redact import redact
@@ -235,6 +238,44 @@ class TestRun(unittest.TestCase):
                      watch_dir=self.dir, declared_paths=[])
         self.assertEqual(result["status"], PASS)
         self.assertEqual(result["changes"]["added"], [])
+
+    def test_a_missing_binary_produces_a_receipt_instead_of_crashing(self):
+        # Previously this raised FileNotFoundError straight out of run() --
+        # no receipt written at all, for exactly the case (something went
+        # wrong) that most needs a record.
+        result = run(
+            task="run something that doesn't exist",
+            cmd=["definitely_not_a_real_binary_xyz"],
+            watch_dir=self.dir,
+            declared_paths=[],
+        )
+        self.assertEqual(result["status"], FAIL)
+        self.assertIn("could not launch the command", result["detail"])
+        self.assertIsNone(result["exit_code"])
+
+    def test_a_nonexistent_watch_dir_produces_a_receipt_instead_of_crashing(self):
+        result = run(
+            task="run in a directory that isn't there",
+            cmd=["python3", "-c", "pass"],
+            watch_dir=str(pathlib.Path(self.dir) / "does" / "not" / "exist"),
+            declared_paths=[],
+        )
+        self.assertEqual(result["status"], FAIL)
+        self.assertIn("could not launch the command", result["detail"])
+
+    def test_launch_failure_receipt_still_gets_written_to_disk_by_the_cli(self):
+        # End to end through the real CLI, not just core.run() -- the point
+        # is that write_receipt() is still reached, since run_task() no
+        # longer raises.
+        out, err = io.StringIO(), io.StringIO()
+        argv = ["run", "--task", "x", "--out", str(pathlib.Path(self.dir) / "receipts"),
+                "--", "definitely_not_a_real_binary_xyz"]
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cli_main(argv)
+        self.assertEqual(code, 1)
+        written = list((pathlib.Path(self.dir) / "receipts").glob("*.json"))
+        self.assertEqual(len(written), 1)
+        self.assertIn("could not launch", json.loads(written[0].read_text())["receipt"]["detail"])
 
     def test_a_command_that_echoes_a_secret_does_not_leak_it_into_the_receipt(self):
         # Regression test for the exact scenario confirmed live during the

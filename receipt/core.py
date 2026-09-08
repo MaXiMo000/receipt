@@ -27,7 +27,31 @@ def run(task: str, cmd: list[str], watch_dir: str = ".",
     """
     before = snapshot(watch_dir)
     started = time.monotonic()
-    proc = subprocess.run(cmd, cwd=watch_dir, capture_output=True, text=True, errors="replace")
+    try:
+        proc = subprocess.run(cmd, cwd=watch_dir, capture_output=True, text=True, errors="replace")
+    except OSError as exc:
+        # The command never ran at all -- `--dir` doesn't exist, the binary
+        # isn't found, no permission to execute it. The one promise this
+        # tool makes is "get a receipt for what actually happened," and
+        # that has to hold here too: report it as a receipt, don't crash
+        # before any evidence exists at all. Nothing ran, so nothing was
+        # touched -- but the declared promise clearly wasn't kept either,
+        # which is a fail, not "nothing to check" (that's what an absent
+        # --declare means, a different situation from this one).
+        return {
+            "task": task,
+            "command": [redact(part) for part in cmd],
+            "watch_dir": watch_dir,
+            "exit_code": None,
+            "seconds": round(time.monotonic() - started, 3),
+            "stdout": "",
+            "stderr": "",
+            "declared_paths": declared_paths,
+            "changes": {"added": [], "modified": [], "removed": [], "renamed": [], "mode_changed": []},
+            "unexpected": [],
+            "status": model.FAIL,
+            "detail": f"could not launch the command: {exc}",
+        }
     seconds = time.monotonic() - started
     after = snapshot(watch_dir)
 
