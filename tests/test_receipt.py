@@ -301,5 +301,67 @@ class TestRun(unittest.TestCase):
         self.assertIn("garbage", result["stdout"])
 
 
+class TestEvidence(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_two_writes_in_the_same_second_do_not_overwrite_each_other(self):
+        # Reproduces, as a regression test, exactly what was confirmed live:
+        # two receipt.run()s started within the same wall-clock second used
+        # to collide on an identical filename and silently overwrite.
+        from unittest import mock
+
+        from receipt.evidence import write
+
+        with mock.patch("time.strftime", return_value="20260101T000000Z"):
+            path1 = write({"task": "first"}, self.tmp.name)
+            path2 = write({"task": "second"}, self.tmp.name)
+
+        self.assertNotEqual(path1, path2)
+        self.assertTrue(path1.exists())
+        self.assertTrue(path2.exists())
+        self.assertEqual(json.loads(path1.read_text())["receipt"]["task"], "first")
+        self.assertEqual(json.loads(path2.read_text())["receipt"]["task"], "second")
+
+    def test_written_record_carries_a_schema_version(self):
+        from receipt.evidence import SCHEMA_VERSION, write
+
+        path = write({"task": "x"}, self.tmp.name)
+        record = json.loads(path.read_text())
+        self.assertEqual(record["schema_version"], SCHEMA_VERSION)
+
+    def test_the_sha256_actually_matches_what_a_reader_would_recompute(self):
+        # The tamper-evidence claim is only real if this holds -- a test
+        # that just checks a "sha256" key exists proves nothing about
+        # whether it's the *right* hash.
+        import hashlib
+
+        from receipt.evidence import write
+
+        path = write({"task": "x", "status": "pass"}, self.tmp.name)
+        record = json.loads(path.read_text())
+        recomputed = hashlib.sha256(
+            json.dumps(record["receipt"], indent=2, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(record["sha256"], recomputed)
+
+    def test_a_tampered_receipt_is_detectable_by_recomputing_the_hash(self):
+        from receipt.evidence import write
+
+        path = write({"task": "x", "status": "pass"}, self.tmp.name)
+        record = json.loads(path.read_text())
+        record["receipt"]["status"] = "fail"  # tamper with it after the fact
+        path.write_text(json.dumps(record))
+
+        import hashlib
+        recomputed = hashlib.sha256(
+            json.dumps(record["receipt"], indent=2, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+        self.assertNotEqual(record["sha256"], recomputed)
+
+
 if __name__ == "__main__":
     unittest.main()
