@@ -7,6 +7,7 @@ PASS -- there was nothing to check it against.
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import sys
 import tempfile
@@ -16,6 +17,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 from receipt.core import run
 from receipt.model import FAIL, PASS, UNVERIFIED
+from receipt.redact import redact
 from receipt.snapshot import diff, snapshot
 
 
@@ -34,6 +36,39 @@ class TestSnapshot(unittest.TestCase):
             result = snapshot(tmp)
             self.assertIn("x.txt", result)
             self.assertEqual(len(result["x.txt"]), 64)  # sha256 hex digest length
+
+
+class TestRedact(unittest.TestCase):
+    def test_keyed_secret_is_masked_key_name_kept(self):
+        out = redact("API_KEY=sk-supersecret12345")
+        self.assertNotIn("sk-supersecret12345", out)
+        self.assertIn("API_KEY=", out)
+        self.assertIn("[REDACTED]", out)
+
+    def test_quoted_keyed_secret_is_masked(self):
+        out = redact('DB_PASSWORD="hunter2trombone"')
+        self.assertNotIn("hunter2trombone", out)
+
+    def test_credentialed_url_masks_only_the_password(self):
+        out = redact("connecting to postgresql://appuser:s3cr3t@db.internal:5432/prod")
+        self.assertNotIn("s3cr3t", out)
+        self.assertIn("appuser", out)  # username isn't secret, keep it for debuggability
+        self.assertIn("db.internal", out)
+
+    def test_recognizable_token_prefix_is_masked_even_with_no_key_name(self):
+        out = redact("printed for debugging: ghp_abcdefghijklmnopqrstuvwxyz0123456789")
+        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz0123456789", out)
+
+    def test_pem_private_key_block_is_masked(self):
+        block = "-----BEGIN PRIVATE KEY-----\nMIIBVQ==\n-----END PRIVATE KEY-----"
+        self.assertNotIn("MIIBVQ==", redact(block))
+
+    def test_ordinary_output_is_left_alone(self):
+        text = "3 files changed, 12 insertions(+), 4 deletions(-)"
+        self.assertEqual(redact(text), text)
+
+    def test_empty_string_is_returned_unchanged(self):
+        self.assertEqual(redact(""), "")
 
 
 class TestRun(unittest.TestCase):
@@ -78,6 +113,29 @@ class TestRun(unittest.TestCase):
                      watch_dir=self.dir, declared_paths=[])
         self.assertEqual(result["status"], PASS)
         self.assertEqual(result["changes"]["added"], [])
+
+    def test_a_command_that_echoes_a_secret_does_not_leak_it_into_the_receipt(self):
+        # Regression test for the exact scenario confirmed live during the
+        # portfolio audit: a wrapped command's own stdout printed a real-
+        # shaped API key, and it landed unredacted in the written receipt.
+        result = run(
+            task="run a script that happens to print its own env",
+            cmd=["python3", "-c", "print('API_KEY=sk-supersecret12345')"],
+            watch_dir=self.dir,
+            declared_paths=[],
+        )
+        self.assertNotIn("sk-supersecret12345", result["stdout"])
+        self.assertNotIn("sk-supersecret12345", json.dumps(result))
+
+    def test_non_utf8_stdout_does_not_crash_the_run(self):
+        result = run(
+            task="emit garbage bytes",
+            cmd=["python3", "-c", "import sys; sys.stdout.buffer.write(b'\\xff\\xfe garbage')"],
+            watch_dir=self.dir,
+            declared_paths=[],
+        )
+        self.assertEqual(result["status"], PASS)
+        self.assertIn("garbage", result["stdout"])
 
 
 if __name__ == "__main__":

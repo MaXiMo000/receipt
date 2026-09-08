@@ -10,6 +10,7 @@ import subprocess
 import time
 
 from . import model
+from .redact import redact
 from .snapshot import diff as diff_snapshots
 from .snapshot import snapshot
 
@@ -26,7 +27,7 @@ def run(task: str, cmd: list[str], watch_dir: str = ".",
     """
     before = snapshot(watch_dir)
     started = time.monotonic()
-    proc = subprocess.run(cmd, cwd=watch_dir, capture_output=True, text=True)
+    proc = subprocess.run(cmd, cwd=watch_dir, capture_output=True, text=True, errors="replace")
     seconds = time.monotonic() - started
     after = snapshot(watch_dir)
 
@@ -49,12 +50,12 @@ def run(task: str, cmd: list[str], watch_dir: str = ".",
 
     return {
         "task": task,
-        "command": cmd,
+        "command": [redact(part) for part in cmd],
         "watch_dir": watch_dir,
         "exit_code": proc.returncode,
         "seconds": round(seconds, 3),
-        "stdout": proc.stdout,
-        "stderr": proc.stderr,
+        "stdout": redact(proc.stdout),
+        "stderr": redact(proc.stderr),
         "declared_paths": declared_paths,
         "changes": changes,
         "unexpected": unexpected,

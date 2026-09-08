@@ -35,7 +35,10 @@ does **not** fail the build; only a broken declared promise (`fail`) does.
 
 1. Hashes every file under the watched directory (sha256, skipping `.git`,
    `__pycache__`, etc.).
-2. Runs the given command, captures stdout/stderr/exit code/timing.
+2. Runs the given command, captures stdout/stderr/exit code/timing, and
+   redacts secret-shaped text (env-var-style `API_KEY=...` assignments,
+   credentialed URLs, well-known token prefixes, PEM key blocks) before any
+   of it is stored — see "What redaction doesn't mean" below.
 3. Hashes the directory again, diffs the two snapshots.
 4. If a scope was declared, checks the diff against it.
 5. Writes the whole thing — command, task, diff, declared scope, verdict —
@@ -67,6 +70,27 @@ against (`unverified`, still a written receipt, still exit 0).
 ```bash
 python tests/test_receipt.py
 ```
+
+## What `pass` doesn't mean
+
+`pass` only means "touched nothing outside the declared scope **within
+`--dir`**." A write anywhere outside that tree — `/tmp`, `~`, a sibling
+directory, an absolute path elsewhere in a monorepo — is invisible to
+`receipt` and won't affect the verdict. Point `--dir` at the smallest tree
+that actually bounds what the task could legitimately touch; don't read
+`pass` as "touched nothing on the filesystem."
+
+## What redaction doesn't mean
+
+Captured stdout/stderr and the command's own argv are swept for
+secret-shaped text (`receipt/redact.py`) before a receipt is written — this
+closes a real gap found during review: a wrapped command that echoed
+`API_KEY=sk-...` landed that value verbatim in the receipt JSON. The sweep
+is a regex net for common shapes, not a guarantee. It will not catch a
+secret with no recognizable shape (e.g. a bare 40-character hex string with
+no key name attached, split across two log lines, or base64-wrapped). If a
+command's output might contain something sensitive in an unusual shape,
+don't assume the receipt is safe to share as-is — read it first.
 
 ## What's deliberately not here yet
 
