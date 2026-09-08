@@ -73,7 +73,7 @@ python tests/test_receipt.py
 No network/API-call capture — only filesystem diffing. "What did this agent
 touch" is answerable this way; "what did this agent call" isn't, without
 hooking into a specific agent framework's own trace or intercepting
-traffic, which is a real, separate, much bigger project. See `PLAN.md`.
+traffic, which is a real, separate, much bigger project.
 
 No glob support in `--declare` — exact relative paths only, for now.
 
