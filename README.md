@@ -16,7 +16,7 @@ same three-status shape as
 $ receipt run --task "fix the auth bug" --declare app/auth.py \
     -- python fix_auth.py
 [FAIL] touched 1 undeclared file(s): app/payments.py
-receipt written to receipts/20260908T121251Z.json
+receipt written to receipts/20260908T121251Z-4f2c9a1b.json
 ```
 
 ## Three statuses, one of them meaning something different here
@@ -33,19 +33,28 @@ does **not** fail the build; only a broken declared promise (`fail`) does.
 
 ## What it actually does
 
-1. Hashes every file under the watched directory (sha256, skipping `.git`,
-   `__pycache__`, etc.).
+1. Hashes and permission-bits every file under the watched directory (sha256
+   + mode, skipping `.git`, `__pycache__`, etc.).
 2. Runs the given command, captures stdout/stderr/exit code/timing, and
    redacts secret-shaped text (env-var-style `API_KEY=...` assignments,
    credentialed URLs, well-known token prefixes, PEM key blocks) before any
-   of it is stored — see "What redaction doesn't mean" below.
-3. Hashes the directory again, diffs the two snapshots.
-4. If a scope was declared, checks the diff against it.
+   of it is stored — see "What redaction doesn't mean" below. A command that
+   never launches at all (bad `--dir`, missing binary) still produces a
+   receipt — `fail`, with the launch error as the detail — instead of a
+   Python traceback and no evidence.
+3. Snapshots the directory again, diffs the two. A removed path and an added
+   path with identical content are reported as one `renamed` pair, not an
+   unrelated delete-plus-create; a path whose content is byte-identical but
+   whose permission bits changed is reported as `mode_changed` — see "What
+   `touched` means" below.
+4. If a scope was declared (exact paths, or glob patterns like `app/*.py`),
+   checks the diff against it.
 5. Writes the whole thing — command, task, diff, declared scope, verdict —
-   to `receipts/<timestamp>.json` alongside a sha256 of the receipt itself,
-   same evidence-bundle idiom as invariant's `--evidence`.
+   to `receipts/<timestamp>-<random>.json` alongside a sha256 of the receipt
+   itself, same evidence-bundle idiom as invariant's `--evidence`.
 
-Zero dependencies — stdlib only (`hashlib`, `subprocess`, `argparse`).
+Zero dependencies — stdlib only (`hashlib`, `subprocess`, `argparse`,
+`fnmatch`).
 
 ## Install
 
@@ -57,7 +66,7 @@ pip install -e .
 
 ```bash
 receipt run --task "what this is supposed to do" \
-  --declare path/one.py,path/two.py \
+  --declare path/one.py,app/*.py \
   --dir . --out receipts/ \
   -- your-command --with --args
 ```
@@ -70,6 +79,16 @@ against (`unverified`, still a written receipt, still exit 0).
 ```bash
 python tests/test_receipt.py
 ```
+
+## What `touched` means
+
+`touched` is the union of every file that was added, removed, had its
+content modified, was renamed (a removed path and an added path sharing a
+content hash), or had its permission bits changed with content otherwise
+identical. A rename or a chmod on a path outside the declared scope is a
+real `fail`, named clearly — `sneaky.txt (renamed from output.txt)`, or
+`secret.env (permissions changed, content unchanged)` — not silently
+folded into "nothing happened" the way a plain content-hash diff would.
 
 ## What `pass` doesn't mean
 
@@ -99,6 +118,11 @@ touch" is answerable this way; "what did this agent call" isn't, without
 hooking into a specific agent framework's own trace or intercepting
 traffic, which is a real, separate, much bigger project.
 
-No glob support in `--declare` — exact relative paths only, for now.
+No policy evaluation or rule composition beyond a flat declared-scope
+check — that's deliberately a different tool's job. `receipt` stays the
+evidence producer;
+[invariant](https://github.com/MaXiMo000/invariant) is where richer policy
+(is this evidence actually OK, across multiple runs, with other checks
+composed in) belongs.
 
 MIT licensed.

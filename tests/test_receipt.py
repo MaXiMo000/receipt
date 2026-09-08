@@ -169,6 +169,44 @@ class TestRun(unittest.TestCase):
         self.assertEqual(result["status"], FAIL)
         self.assertIn("sneaky.txt", result["unexpected"])
 
+    def test_a_glob_pattern_in_declare_covers_a_whole_directory(self):
+        result = run(
+            task="write two files under app/",
+            cmd=["python3", "-c",
+                 "import os; os.mkdir('app')"
+                 "; open('app/one.py', 'w').write('x')"
+                 "; open('app/two.py', 'w').write('y')"],
+            watch_dir=self.dir,
+            declared_paths=["app/*.py"],
+        )
+        self.assertEqual(result["status"], PASS)
+
+    def test_a_glob_pattern_does_not_match_a_file_outside_its_scope(self):
+        result = run(
+            task="write inside and outside app/",
+            cmd=["python3", "-c",
+                 "import os; os.mkdir('app')"
+                 "; open('app/one.py', 'w').write('x')"
+                 "; open('outside.py', 'w').write('y')"],
+            watch_dir=self.dir,
+            declared_paths=["app/*.py"],
+        )
+        self.assertEqual(result["status"], FAIL)
+        self.assertIn("outside.py", result["unexpected"])
+
+    def test_a_literal_declared_path_still_works_alongside_globs(self):
+        # Exact declarations and globs can be mixed in one --declare list.
+        result = run(
+            task="write a literal file and a globbed one",
+            cmd=["python3", "-c",
+                 "import os; os.mkdir('app')"
+                 "; open('README.md', 'w').write('x')"
+                 "; open('app/one.py', 'w').write('y')"],
+            watch_dir=self.dir,
+            declared_paths=["README.md", "app/*.py"],
+        )
+        self.assertEqual(result["status"], PASS)
+
     def test_no_declared_scope_is_unverified_not_a_silent_pass(self):
         result = run(
             task="do something",

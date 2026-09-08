@@ -1,4 +1,4 @@
-"""receipt run --task "..." [--declare a.py,b.py] [--out receipts/] -- <command...>"""
+"""receipt run --task "..." [--declare a.py,app/*.py] [--out receipts/] -- <command...>"""
 from __future__ import annotations
 
 import argparse
@@ -24,8 +24,9 @@ def main(argv: list[str] | None = None) -> int:
     run_p.add_argument("--task", required=True, help="what the command was asked to do")
     run_p.add_argument("--dir", default=".", dest="watch_dir", help="directory to watch (default: .)")
     run_p.add_argument("--declare", default=None,
-                        help="comma-separated relative paths the task is allowed to touch; "
-                             "omit to record without a declared scope (status: unverified)")
+                        help="comma-separated relative paths (globs like app/*.py allowed) the "
+                             "task is allowed to touch; omit to record without a declared scope "
+                             "(status: unverified)")
     run_p.add_argument("--out", default="receipts", help="directory to write the receipt into")
 
     args = parser.parse_args(own_args)

@@ -6,6 +6,7 @@ around this one function.
 """
 from __future__ import annotations
 
+import fnmatch
 import subprocess
 import time
 
@@ -15,15 +16,33 @@ from .snapshot import diff as diff_snapshots
 from .snapshot import snapshot
 
 
+def _is_declared(path: str, declared: set[str]) -> bool:
+    """A path is covered if it's an exact declared entry, or matches one as
+    a glob (`fnmatch`, case-sensitive on every platform -- consistent
+    matching regardless of OS matters more here than following whatever
+    case convention the local filesystem happens to use).
+
+    Exact match is checked first and separately so a literal declared path
+    containing an unintentional glob character (`[`, `]`, `?`, `*` in a
+    real filename) still matches itself even if it also happens to be a
+    strange glob pattern -- globs are additive, not a replacement for
+    exact matching.
+    """
+    if path in declared:
+        return True
+    return any(fnmatch.fnmatchcase(path, pattern) for pattern in declared)
+
+
 def run(task: str, cmd: list[str], watch_dir: str = ".",
         declared_paths: list[str] | None = None) -> dict:
     """Execute `cmd` in `watch_dir`, and report what changed there.
 
-    declared_paths, if given, is the exact set of relative paths the task
-    claimed it would touch. Anything touched outside that set is a `fail`.
-    If declared_paths is None, no claim was made -- the receipt still
-    records exactly what happened, but the status is `unverified`: there's
-    nothing to check the touched files against.
+    declared_paths, if given, is the set of relative paths (or glob
+    patterns, e.g. `app/*.py`) the task claimed it would touch. Anything
+    touched that doesn't match one of them is a `fail`. If declared_paths
+    is None, no claim was made -- the receipt still records exactly what
+    happened, but the status is `unverified`: there's nothing to check the
+    touched files against.
     """
     before = snapshot(watch_dir)
     started = time.monotonic()
@@ -80,7 +99,7 @@ def run(task: str, cmd: list[str], watch_dir: str = ".",
         detail = f"{len(touched)} file(s) touched; no declared scope to check against"
     else:
         declared = set(declared_paths)
-        unexpected = [p for p in touched if p not in declared]
+        unexpected = [p for p in touched if not _is_declared(p, declared)]
         if unexpected:
             status = model.FAIL
             detail = f"touched {len(unexpected)} undeclared file(s): {', '.join(_annotate(p) for p in unexpected)}"
