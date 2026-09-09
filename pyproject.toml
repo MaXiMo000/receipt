@@ -1,5 +1,9 @@
 [project]
-name = "receipt"
+# The command stays `receipt`; the distribution cannot -- both "receipt" and
+# "receipt-verify" are already taken on PyPI (checked, not assumed). A
+# distribution name differing from the command it installs is ordinary
+# (python-dateutil installs `dateutil`).
+name = "receipt-evidence"
 version = "0.1.0"
 description = "Run a command, and get a receipt for what it actually touched -- not just what it was asked to do."
 requires-python = ">=3.10"
@@ -17,13 +21,19 @@ classifiers = [
 ]
 dependencies = []
 
+urls.Homepage = "https://github.com/MaXiMo000/receipt"
 urls.Source = "https://github.com/MaXiMo000/receipt"
+urls.Issues = "https://github.com/MaXiMo000/receipt/issues"
+urls.Changelog = "https://github.com/MaXiMo000/receipt/releases"
 
 [project.scripts]
 receipt = "receipt.cli:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+# 77 is the floor for PEP 639 (`license = "MIT"` as an SPDX expression) --
+# a lesson already paid for in a sibling project's own release workflow,
+# applied here before it bites this one too.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

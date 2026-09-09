@@ -59,6 +59,12 @@ Zero dependencies — stdlib only (`hashlib`, `subprocess`, `argparse`,
 ## Install
 
 ```bash
+pip install receipt-evidence        # the command it installs is `receipt`
+```
+
+Or from a checkout, for development:
+
+```bash
 pip install -e .
 ```
 
