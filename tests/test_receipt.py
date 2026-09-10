@@ -157,6 +157,15 @@ class TestRedact(unittest.TestCase):
         out = redact('DB_PASSWORD="hunter2trombone"')
         self.assertNotIn("hunter2trombone", out)
 
+    def test_json_body_with_quoted_key_is_masked(self):
+        # A JSON request/response body -- clicked's own captured POST data
+        # is this shape more often than not, and the key itself is quoted
+        # too, unlike the env-var shape above.
+        out = redact('{"password": "hunter2trombone", "user": "alice"}')
+        self.assertNotIn("hunter2trombone", out)
+        self.assertIn("alice", out)  # only the secret-named key is touched
+        self.assertIn('"password"', out)
+
     def test_credentialed_url_masks_only_the_password(self):
         out = redact("connecting to postgresql://appuser:s3cr3t@db.internal:5432/prod")
         self.assertNotIn("s3cr3t", out)

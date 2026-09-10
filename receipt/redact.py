@@ -16,10 +16,12 @@ MASK = "[REDACTED]"
 
 # key=value / key: value pairs where the key name says "this is a secret" --
 # the most common real leak shape (the exact one confirmed live in the
-# audit: an env var echoed by the wrapped command).
+# audit: an env var echoed by the wrapped command). The key itself may be
+# quoted too (`"password": "..."`) -- a JSON request body, the shape
+# `clicked`'s captured POST data is in more often than not.
 _KEYED = re.compile(
-    r"(?i)\b([A-Za-z0-9_]*(?:SECRET|TOKEN|API[_-]?KEY|ACCESS[_-]?KEY|"
-    r"PASSWORD|PASSWD|PWD|CREDENTIAL)[A-Za-z0-9_]*)(\s*[:=]\s*)(['\"]?)(\S+)\3"
+    r"(?i)(['\"]?)\b([A-Za-z0-9_]*(?:SECRET|TOKEN|API[_-]?KEY|ACCESS[_-]?KEY|"
+    r"PASSWORD|PASSWD|PWD|CREDENTIAL)[A-Za-z0-9_]*)\1(\s*[:=]\s*)(['\"]?)(\S+)\4"
 )
 
 # scheme://user:pass@host -- a DSN or an authenticated URL carrying a
@@ -53,6 +55,6 @@ def redact(text: str) -> str:
         return text
     text = _PEM_BLOCK.sub(MASK, text)
     text = _URL_CRED.sub(lambda m: f"{m.group(1)}{m.group(2)}:{MASK}@", text)
-    text = _KEYED.sub(lambda m: f"{m.group(1)}{m.group(2)}{MASK}", text)
+    text = _KEYED.sub(lambda m: f"{m.group(1)}{m.group(2)}{m.group(1)}{m.group(3)}{MASK}", text)
     text = _PREFIXED.sub(MASK, text)
     return text
