@@ -29,12 +29,24 @@ def snapshot(root: str | pathlib.Path) -> dict[str, dict]:
             path = pathlib.Path(dirpath) / name
             rel = str(path.relative_to(root))
             try:
-                content_hash = _hash_file(path)
-                mode = stat.S_IMODE(path.stat().st_mode)
+                st = path.stat()
             except OSError:
                 # Gone by the time we got to it (a temp file, a race) --
                 # skip rather than fail the whole snapshot over one file.
                 continue
+            if not stat.S_ISREG(st.st_mode):
+                # A FIFO, socket, or device node isn't something `open()`
+                # can be trusted to return from: a FIFO with no writer on
+                # the other end blocks forever, turning one weird file
+                # into a snapshot that never completes. Content hashing
+                # only makes sense for regular files anyway -- skip it,
+                # the same way a file that vanished mid-walk is skipped.
+                continue
+            try:
+                content_hash = _hash_file(path)
+            except OSError:
+                continue
+            mode = stat.S_IMODE(st.st_mode)
             files[rel] = {"hash": content_hash, "mode": mode}
     return files
 

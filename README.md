@@ -34,7 +34,11 @@ does **not** fail the build; only a broken declared promise (`fail`) does.
 ## What it actually does
 
 1. Hashes and permission-bits every file under the watched directory (sha256
-   + mode, skipping `.git`, `__pycache__`, etc.).
+   + mode, skipping `.git`, `__pycache__`, etc.). Only regular files are
+   hashed — a FIFO, socket, or device node is skipped rather than opened,
+   since `open()` on a FIFO with no writer on the other end blocks forever
+   (a real bug, found and fixed: a `--dir /tmp` scope check hung two CI
+   runs for a full 6 hours each before this guard existed).
 2. Runs the given command, captures stdout/stderr/exit code/timing, and
    redacts secret-shaped text (env-var-style `API_KEY=...` assignments,
    credentialed URLs, well-known token prefixes, PEM key blocks) before any

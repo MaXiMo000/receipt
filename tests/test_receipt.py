@@ -10,9 +10,11 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import pathlib
 import sys
 import tempfile
+import threading
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -22,6 +24,23 @@ from receipt.core import run
 from receipt.model import FAIL, PASS, UNVERIFIED
 from receipt.redact import redact
 from receipt.snapshot import diff, snapshot
+
+
+def _run_with_timeout(fn, args, timeout):
+    """Run fn(*args) on a daemon thread and fail loudly on timeout instead
+    of hanging the whole suite -- used only for the FIFO regression test,
+    where the bug being guarded against is an infinite block on open()."""
+    result: dict = {}
+
+    def target():
+        result["value"] = fn(*args)
+
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        raise AssertionError(f"{fn.__name__} did not return within {timeout}s -- hung")
+    return result["value"]
 
 
 def _entry(content_hash: str, mode: int = 0o644) -> dict:
@@ -106,6 +125,25 @@ class TestSnapshot(unittest.TestCase):
             path.chmod(0o755)
             result = snapshot(tmp)
             self.assertEqual(result["script.sh"]["mode"], 0o755)
+
+    def test_snapshot_does_not_hang_on_a_fifo_with_no_writer(self):
+        # A real named pipe with nothing on the other end: open(path, "rb")
+        # blocks forever waiting for a writer to connect. snapshot() must
+        # never reach that open() call for a non-regular file -- this test
+        # times out (fails loudly) instead of hanging the whole suite if
+        # the S_ISREG guard regresses.
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("os.mkfifo not available on this platform")
+        with tempfile.TemporaryDirectory() as tmp:
+            fifo_path = pathlib.Path(tmp) / "pipe"
+            os.mkfifo(fifo_path)
+            regular = pathlib.Path(tmp) / "x.txt"
+            regular.write_text("hello")
+
+            result = _run_with_timeout(snapshot, (tmp,), timeout=5)
+
+            self.assertNotIn("pipe", result)  # skipped, not hashed
+            self.assertIn("x.txt", result)  # regular files still snapshot fine
 
 
 class TestRedact(unittest.TestCase):
