@@ -4,7 +4,7 @@
 # distribution name differing from the command it installs is ordinary
 # (python-dateutil installs `dateutil`).
 name = "receipt-evidence"
-version = "0.1.0"
+version = "0.1.1"
 description = "Run a command, and get a receipt for what it actually touched -- not just what it was asked to do."
 requires-python = ">=3.10"
 readme = "README.md"
