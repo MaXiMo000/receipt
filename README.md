@@ -1,16 +1,42 @@
 # receipt
 
-**Run a command. Get a receipt for what it actually touched — not just what
-it was asked to do.**
+[![ci](https://github.com/MaXiMo000/receipt/actions/workflows/ci.yml/badge.svg)](https://github.com/MaXiMo000/receipt/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/receipt-evidence)](https://pypi.org/project/receipt-evidence/)
 
-An AI agent (or a script, or a CI job) says it's going to fix a bug in one
-file. Nothing checks whether that's what it actually did until someone
-reviews the diff by hand, if they do at all. `receipt` snapshots the working
-directory before and after, and reports `pass`, `fail`, or `unverified` —
-same three-status shape as
+**Verified receipts for what actually happened -- not what was claimed.**
+
+A shell command, an AI agent's tool call, a click in a browser: each one
+comes with a self-report ("I edited auth.py", "Saved!"). `receipt` checks
+the self-report against reality, independently, and writes down what it
+found in a tamper-evident file you can hand to someone else.
+
+| what happened | how you capture it | what gets checked |
+|---|---|---|
+| a shell command | `receipt run --declare ... -- cmd` | every file it touched, against the scope you declared |
+| an AI agent's `Edit`/`Write`/`Bash` call | the `custody-hook` Claude Code hook | the bytes on disk are exactly what the tool says it wrote |
+| one browser interaction | `with capture(page): ...` (Playwright) | every network request it really made, and optionally the files it caused |
+
+Every receipt is JSON with a sha256 over its content -- the
+[Providence](PROVIDENCE_SPEC.md) shape -- and `providence check` tells you
+if one was edited after it was written.
+
+```bash
+pip install receipt-evidence     # zero dependencies; installs `receipt`, `custody-hook`, `providence`
+```
+
+One package, stdlib only. (It used to be four: `receipt-evidence`,
+`custody-evidence`, `clicked-evidence` and `providence-evidence`. The old
+names still install and point here.) Import it as `receipt_evidence`.
+
+Three statuses throughout, same as
 [invariant](https://github.com/MaXiMo000/invariant),
-[firedrill](https://github.com/MaXiMo000/firedrill), and
-[carabiner](https://github.com/MaXiMo000/carabiner).
+[firedrill](https://github.com/MaXiMo000/firedrill) and
+[carabiner](https://github.com/MaXiMo000/carabiner): `pass`, `fail`, and
+`unverified` -- a check that couldn't decide is never reported as a pass.
+
+---
+
+## 1. Shell commands: `receipt run`
 
 ```
 $ receipt run --task "fix the auth bug" --declare app/auth.py \
@@ -19,61 +45,6 @@ $ receipt run --task "fix the auth bug" --declare app/auth.py \
 receipt written to receipts/20260908T121251Z-4f2c9a1b.json
 ```
 
-## Three statuses, one of them meaning something different here
-
-`pass` — touched only what was declared. `fail` — touched something outside
-the declared scope, named exactly. `unverified` — no scope was declared for
-this run at all.
-
-That third one is a deliberate difference from invariant/firedrill/
-carabiner, where `unverified` means "a check that should have run, didn't."
-Here it means "no promise was made this time" — plain audit logging is a
-normal, legitimate use of this tool, not a degraded one. So `unverified`
-does **not** fail the build; only a broken declared promise (`fail`) does.
-
-## What it actually does
-
-1. Hashes and permission-bits every file under the watched directory (sha256
-   + mode, skipping `.git`, `__pycache__`, etc.). Only regular files are
-   hashed — a FIFO, socket, or device node is skipped rather than opened,
-   since `open()` on a FIFO with no writer on the other end blocks forever
-   (a real bug, found and fixed: a `--dir /tmp` scope check hung two CI
-   runs for a full 6 hours each before this guard existed).
-2. Runs the given command, captures stdout/stderr/exit code/timing, and
-   redacts secret-shaped text (env-var-style `API_KEY=...` assignments,
-   credentialed URLs, well-known token prefixes, PEM key blocks) before any
-   of it is stored — see "What redaction doesn't mean" below. A command that
-   never launches at all (bad `--dir`, missing binary) still produces a
-   receipt — `fail`, with the launch error as the detail — instead of a
-   Python traceback and no evidence.
-3. Snapshots the directory again, diffs the two. A removed path and an added
-   path with identical content are reported as one `renamed` pair, not an
-   unrelated delete-plus-create; a path whose content is byte-identical but
-   whose permission bits changed is reported as `mode_changed` — see "What
-   `touched` means" below.
-4. If a scope was declared (exact paths, or glob patterns like `app/*.py`),
-   checks the diff against it.
-5. Writes the whole thing — command, task, diff, declared scope, verdict —
-   to `receipts/<timestamp>-<random>.json` alongside a sha256 of the receipt
-   itself, same evidence-bundle idiom as invariant's `--evidence`.
-
-Zero dependencies — stdlib only (`hashlib`, `subprocess`, `argparse`,
-`fnmatch`).
-
-## Install
-
-```bash
-pip install receipt-evidence        # the command it installs is `receipt`
-```
-
-Or from a checkout, for development:
-
-```bash
-pip install -e .
-```
-
-## Use
-
 ```bash
 receipt run --task "what this is supposed to do" \
   --declare path/one.py,app/*.py \
@@ -81,58 +52,177 @@ receipt run --task "what this is supposed to do" \
   -- your-command --with --args
 ```
 
-Omit `--declare` to just log what happened without a scope to check it
-against (`unverified`, still a written receipt, still exit 0).
+`pass` -- touched only what was declared. `fail` -- touched something
+outside the declared scope, named exactly. `unverified` -- no `--declare`
+was given: plain audit logging, a normal use, so it does **not** fail the
+build; only a broken declared promise does.
 
-## Test
+What it does:
 
-```bash
-python tests/test_receipt.py
+1. Hashes and permission-bits every regular file under `--dir` (skipping
+   `.git`, `__pycache__`, `node_modules`, `.venv`). A FIFO, socket or device
+   node is skipped rather than opened -- `open()` on a FIFO with no writer
+   blocks forever (a real bug: it hung two CI runs for 6 hours each).
+2. Runs the command, capturing stdout/stderr/exit code/timing, and redacts
+   secret-shaped text before storing any of it. A command that never
+   launches (bad `--dir`, missing binary) still produces a receipt --
+   `fail`, with the launch error -- not a traceback and no evidence.
+3. Snapshots again and diffs. A delete plus a create with identical content
+   is one `renamed` pair; identical content with changed permission bits is
+   `mode_changed`.
+4. Checks the diff against the declared scope (exact paths or globs like
+   `app/*.py`, matched with `/` on every OS).
+5. Writes command, task, diff, scope and verdict to
+   `receipts/<timestamp>-<random>.json` with a sha256 of the record.
+   Shape: [`schema/receipt.schema.json`](schema/receipt.schema.json).
+
+**What `touched` means:** added, removed, modified, renamed (either end),
+or permissions changed. A rename or chmod outside the scope is a real
+`fail`, named clearly -- `sneaky.txt (renamed from output.txt)`.
+
+**What `pass` doesn't mean:** "touched nothing outside the declared scope
+*within `--dir`*." A write to `/tmp`, `~` or a sibling directory is
+invisible here. Point `--dir` at the smallest tree that bounds the task.
+
+## 2. AI agent tool calls: the Claude Code hook
+
+`custody-hook` runs on every `Edit`, `Write` and `Bash` call a Claude Code
+session makes, and writes one receipt per call to `.custody/receipts/`.
+
+For `Edit`/`Write` it rebuilds the text the tool reports having left on
+disk -- `Write`'s `content`, or `Edit`'s `originalFile` with its
+`oldString` -> `newString` replacement -- and compares it to the file's
+real bytes:
+
+| what's on disk | status |
+|---|---|
+| exactly what the tool reported writing | `pass` |
+| anything else (a partial write, a formatter or another process racing it) | **`fail`** |
+| the file is gone after the call | `unverified` |
+| not UTF-8, so not comparable as text | falls back to a before/after sha256 |
+
+A file's CRLF line endings and a UTF-8 BOM are not differences: `Edit`
+keeps both on disk while reporting normalized text (measured against real
+Claude Code, not assumed). `Bash` calls are recorded -- every file the
+command changed -- but judged `unverified`: an agent's shell command
+declares no scope to check against.
+
+Wire it into `.claude/settings.json` (a project) or
+`~/.claude/settings.json` (everywhere):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{ "matcher": "Edit|Write|Bash",
+      "hooks": [{ "type": "command", "command": "custody-hook" }] }],
+    "PostToolUse": [{ "matcher": "Edit|Write|Bash",
+      "hooks": [{ "type": "command", "command": "custody-hook" }] }]
+  }
+}
 ```
 
-## What `touched` means
+**`custody-hook` must be on the `PATH` Claude Code runs hooks with** -- a
+project-local `.venv` isn't, and a hook command that doesn't resolve fails
+silently. Use `pipx install receipt-evidence`, or put the absolute path in
+`command`. Add `.custody/` to `.gitignore`.
 
-`touched` is the union of every file that was added, removed, had its
-content modified, was renamed (a removed path and an added path sharing a
-content hash), or had its permission bits changed with content otherwise
-identical. A rename or a chmod on a path outside the declared scope is a
-real `fail`, named clearly — `sneaky.txt (renamed from output.txt)`, or
-`secret.env (permissions changed, content unchanged)` — not silently
-folded into "nothing happened" the way a plain content-hash diff would.
+The hook never blocks a tool call and always exits 0: it's a witness, not
+a gate. Verified end to end in a real Claude Code session.
 
-## What `pass` doesn't mean
+## 3. Browser interactions: `capture()`
 
-`pass` only means "touched nothing outside the declared scope **within
-`--dir`**." A write anywhere outside that tree — `/tmp`, `~`, a sibling
-directory, an absolute path elsewhere in a monorepo — is invisible to
-`receipt` and won't affect the verdict. Point `--dir` at the smallest tree
-that actually bounds what the task could legitimately touch; don't read
-`pass` as "touched nothing on the filesystem."
+```python
+from receipt_evidence.browser import capture
 
-## What redaction doesn't mean
+with capture(page, task="delete account button", watch_dir="./data") as c:
+    page.click("#delete-account-button")
+    page.wait_for_load_state("networkidle")
 
-Captured stdout/stderr and the command's own argv are swept for
-secret-shaped text (`receipt/redact.py`) before a receipt is written — this
-closes a real gap found during review: a wrapped command that echoed
-`API_KEY=sk-...` landed that value verbatim in the receipt JSON. The sweep
-is a regex net for common shapes, not a guarantee. It will not catch a
-secret with no recognizable shape (e.g. a bare 40-character hex string with
-no key name attached, split across two log lines, or base64-wrapped). If a
-command's output might contain something sensitive in an unusual shape,
-don't assume the receipt is safe to share as-is — read it first.
+c.write("receipt.json")        # a Providence bundle
+print(c.result["requests"])    # every request/response actually made
+print(c.result["changes"])     # what landed in ./data because of it
+```
 
-## What's deliberately not here yet
+`c.result["requests"]` is every request made during the block -- URL,
+method, POST body, status, or a `failure` reason if it never got a
+response. That's what the browser actually sent, not what the page's
+JavaScript claims. `watch_dir` (optional) snapshot-diffs a local directory
+too, closing the loop from a click to a real backend side effect.
 
-No network/API-call capture — only filesystem diffing. "What did this agent
-touch" is answerable this way; "what did this agent call" isn't, without
-hooking into a specific agent framework's own trace or intercepting
-traffic, which is a real, separate, much bigger project.
+Works with any Playwright `Page` -- Playwright is never imported, only
+`.on()`/`.remove_listener()` are called -- so there's no dependency on it
+or on any particular version.
 
-No policy evaluation or rule composition beyond a flat declared-scope
-check — that's deliberately a different tool's job. `receipt` stays the
-evidence producer;
-[invariant](https://github.com/MaXiMo000/invariant) is where richer policy
-(is this evidence actually OK, across multiple runs, with other checks
-composed in) belongs.
+## 4. The bundle format: `providence`
+
+```
+$ providence check proof/
+PASS  proof/ is a conformant Providence bundle
+
+$ providence check proof/   # after someone hand-edits a file in it
+FAIL  proof/manifest.json: items[0] (id=no_negative_payments): sha256 mismatch -- ...
+```
+
+One versioned shape for "content + sha256(content) + when", in two forms:
+a single JSON file (`payload` + `sha256` of its canonical serialization),
+or a directory (`manifest.json` + one `<id>.json` per item). Full spec:
+[PROVIDENCE_SPEC.md](PROVIDENCE_SPEC.md). `providence check` verifies every
+hash, that every file is accounted for, and rejects item ids or symlinks
+that would reach outside the bundle.
+
+```bash
+providence convert-invariant proof/ out/     # an invariant --evidence dir
+providence convert-receipt receipts/x.json out/
+```
+
+**What this is not:** a signature. A sha256 proves content wasn't edited
+*after* the bundle was written -- not who wrote it, nor that the whole
+bundle wasn't regenerated from scratch.
+
+---
+
+## Redaction, and what it doesn't mean
+
+Captured stdout/stderr, argv, URLs and POST bodies are swept for
+secret-shaped text (`receipt_evidence/redact.py`: `KEY=value` pairs,
+credentialed URLs, well-known token prefixes, PEM private keys) before
+anything is written. It's a regex net for common shapes, not a guarantee:
+a secret with no recognizable shape gets through. Read a receipt before
+sharing it if a command might have printed something sensitive.
+
+## Python API
+
+```python
+from receipt_evidence.core import run                        # receipt run, as a function
+from receipt_evidence.browser import capture                 # browser interactions
+from receipt_evidence.providence.check import check_bundle   # [] means conformant
+from receipt_evidence.providence.spec import make_bundle     # write your own
+```
+
+## Tests
+
+```bash
+pip install -e . jsonschema
+python tests/test_receipt.py
+python tests/test_providence.py
+python tests/test_claude_core.py
+python tests/test_claude_hook.py     # tool_response shapes captured from real Claude Code
+python tests/test_browser.py
+
+pip install playwright && python -m playwright install chromium
+python tests/test_browser_live.py    # a real Chromium, a real server
+```
+
+CI runs on Linux and Windows, plus the live-browser suite and a cold
+install of the built wheel that exercises all three commands.
+
+## Not here yet
+
+- Writes outside the watched directory (`/tmp`, `~`) aren't seen by
+  `receipt run` -- that needs OS-level tracing, a separate project.
+- No network capture for shell commands, only for browser interactions.
+- Policy beyond a flat declared scope belongs in
+  [invariant](https://github.com/MaXiMo000/invariant), which reads these
+  receipts as one of its check types.
 
 MIT licensed.

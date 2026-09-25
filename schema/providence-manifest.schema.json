@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MaXiMo000/providence/schema/manifest.schema.json",
+  "title": "Providence bundle-directory manifest",
+  "description": "manifest.json for the directory form of a Providence bundle -- see SPEC.md. Documentation only; providence/check.py validates by hand rather than importing a jsonschema dependency for this.",
+  "type": "object",
+  "required": ["providence_version", "generated_at", "tool", "items"],
+  "properties": {
+    "providence_version": { "type": "integer", "const": 1 },
+    "generated_at": { "type": "number", "description": "Unix timestamp." },
+    "tool": { "type": "string", "description": "Which tool produced this bundle, e.g. 'invariant', 'receipt'." },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "sha256"],
+        "properties": {
+          "id": { "type": "string", "description": "Unique within this manifest. Evidence lives at '<id>.json' beside manifest.json." },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "sha256 of the exact bytes of '<id>.json'." },
+          "status": { "type": ["string", "null"], "description": "Tool-defined, e.g. pass/fail/unverified. Optional." },
+          "detail": { "type": "string", "description": "Tool-defined human-readable note. Optional." }
+        }
+      }
+    }
+  }
+}

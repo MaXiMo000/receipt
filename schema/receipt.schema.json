@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/MaXiMo000/receipt/schema/receipt.schema.json",
   "title": "receipt evidence record",
-  "description": "The record written by receipt/evidence.py:write() to receipts/<timestamp>-<random>.json. schema_version bumps only on a breaking change (a field renamed or removed) -- a new field being added is not breaking and does not bump it.",
+  "description": "The record written by receipt_evidence/evidence.py:write() to receipts/<timestamp>-<random>.json. schema_version bumps only on a breaking change (a field renamed or removed) -- a new field being added is not breaking and does not bump it.",
   "type": "object",
   "required": ["schema_version", "receipt", "sha256", "written_at"],
   "additionalProperties": false,
@@ -36,7 +36,7 @@
         "command": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "The argv the command was run with, redacted (receipt/redact.py) -- secret-shaped substrings are replaced with [REDACTED]."
+          "description": "The argv the command was run with, redacted (receipt_evidence/redact.py) -- secret-shaped substrings are replaced with [REDACTED]."
         },
         "watch_dir": { "type": "string" },
         "exit_code": {

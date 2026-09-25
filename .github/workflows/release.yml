@@ -18,7 +18,10 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -e . jsonschema
-      - run: python tests/test_receipt.py
+      - run: |
+          for t in tests/test_receipt.py tests/test_providence.py tests/test_claude_core.py tests/test_claude_hook.py tests/test_browser.py; do
+            python "$t"
+          done
 
       # The tag and the packaged version must be the same thing. Without this a
       # repo happily ships v0.2.0 built from a tree that still says 0.1.0, and
@@ -29,7 +32,7 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF_NAME#v}"
           declared="$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)"
-          init="$(python -c 'import receipt; print(receipt.__version__)')"
+          init="$(python -c 'import receipt_evidence; print(receipt_evidence.__version__)')"
           echo "tag=$tag  pyproject=$declared  __init__=$init"
           test "$tag" = "$declared"
           test "$tag" = "$init"
