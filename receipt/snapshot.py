@@ -27,7 +27,13 @@ def snapshot(root: str | pathlib.Path) -> dict[str, dict]:
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
         for name in filenames:
             path = pathlib.Path(dirpath) / name
-            rel = str(path.relative_to(root))
+            # .as_posix(), not str(): declared scopes are always written
+            # with forward slashes (README examples, tests -- "app/*.py"),
+            # and core._is_declared glob-matches against this string
+            # directly. str() on Windows returns backslashes, which makes
+            # every multi-directory glob silently fail to match and turns
+            # legitimate declared changes into a false `fail`.
+            rel = path.relative_to(root).as_posix()
             try:
                 st = path.stat()
             except OSError:
