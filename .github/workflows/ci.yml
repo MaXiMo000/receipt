@@ -11,8 +11,7 @@ permissions:
 jobs:
   test:
     # jsonschema is installed here only, as a test-only tool for
-    # TestSchema -- receipt itself stays zero-dependency (pip install -e .
-    # alone, no extras) for anyone actually using it.
+    # TestSchema -- receipt-evidence itself stays zero-dependency.
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -29,13 +28,29 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: pip install -e . jsonschema
       - run: python tests/test_receipt.py
+      - run: python tests/test_providence.py
+      - run: python tests/test_claude_core.py
+      - run: python tests/test_claude_hook.py
+      - run: python tests/test_browser.py
+
+  test-live:
+    # A real headless Chromium clicking a real button against a real local
+    # server -- its own job because installing a browser is real time the
+    # matrix above doesn't need to pay for.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: pip install -e . playwright
+      - run: python -m playwright install --with-deps chromium
+      - run: python tests/test_browser_live.py
 
   package:
-    # Build and install the distribution on every commit, not only at
-    # release -- a packaging break (missing package data, wrong entry
-    # point) is invisible to `pip install -e .` and only shows up in the
-    # wheel. Runs a real end-to-end scope check with the installed CLI,
-    # cold, with no dev checkout on PYTHONPATH.
+    # Build and install the wheel on every commit, not only at release -- a
+    # packaging break (missing subpackage, wrong entry point) is invisible to
+    # `pip install -e .`. Exercises all three installed commands, cold.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -43,14 +58,27 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install build && python -m build
-      - name: Install the wheel and run a real scope check with it
+      - name: Install the wheel and use every command it ships
         run: |
           set -euo pipefail
           python -m venv /tmp/v
           /tmp/v/bin/pip install --disable-pip-version-check -q dist/*.whl
+          test "$(/tmp/v/bin/python -c 'import receipt_evidence; print(receipt_evidence.__version__)')" \
+             = "$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)"
+
+          # receipt: a real scope check
           /tmp/v/bin/receipt run --task "smoke test" --declare out.txt \
             --dir /tmp --out /tmp/receipts \
             -- /tmp/v/bin/python -c "open('/tmp/out.txt', 'w').write('x')"
           test -f /tmp/receipts/*.json || (echo "no receipt written" && exit 1)
-          test "$(/tmp/v/bin/python -c 'import receipt; print(receipt.__version__)')" \
-             = "$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)"
+
+          # custody-hook: a real Write event round-trip, then providence
+          # validates the receipt it wrote
+          mkdir -p /tmp/proj
+          pre='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_use_id":"t1","cwd":"/tmp/proj","tool_input":{"file_path":"/tmp/proj/a.txt"}}'
+          echo "$pre" | /tmp/v/bin/custody-hook
+          printf 'hi' > /tmp/proj/a.txt
+          echo "${pre/PreToolUse/PostToolUse}" | sed 's/}}$/},"tool_response":{"type":"create","filePath":"\/tmp\/proj\/a.txt","content":"hi"}}/' \
+            | /tmp/v/bin/custody-hook
+          grep -q '"status": "pass"' /tmp/proj/.custody/receipts/t1.json
+          /tmp/v/bin/providence check /tmp/proj/.custody/receipts/t1.json

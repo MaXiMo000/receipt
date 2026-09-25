@@ -19,11 +19,11 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
-from receipt.cli import main as cli_main
-from receipt.core import run
-from receipt.model import FAIL, PASS, UNVERIFIED
-from receipt.redact import redact
-from receipt.snapshot import diff, snapshot
+from receipt_evidence.cli import main as cli_main
+from receipt_evidence.core import run
+from receipt_evidence.model import FAIL, PASS, UNVERIFIED
+from receipt_evidence.redact import redact
+from receipt_evidence.snapshot import diff, snapshot
 
 
 def _run_with_timeout(fn, args, timeout):
@@ -429,7 +429,7 @@ class TestSchema(unittest.TestCase):
 
     def test_a_real_pass_receipt_validates_against_the_schema(self):
         import jsonschema
-        from receipt.evidence import write
+        from receipt_evidence.evidence import write
 
         result = run(task="write output.txt",
                       cmd=[sys.executable, "-c", "open('output.txt', 'w').write('x')"],
@@ -439,7 +439,7 @@ class TestSchema(unittest.TestCase):
 
     def test_a_real_fail_receipt_with_a_rename_validates_against_the_schema(self):
         import jsonschema
-        from receipt.evidence import write
+        from receipt_evidence.evidence import write
 
         (pathlib.Path(self.tmp.name) / "a.txt").write_text("x")
         result = run(task="rename", cmd=[sys.executable, "-c", "import os; os.rename('a.txt', 'b.txt')"],
@@ -449,7 +449,7 @@ class TestSchema(unittest.TestCase):
 
     def test_a_real_launch_failure_receipt_validates_against_the_schema(self):
         import jsonschema
-        from receipt.evidence import write
+        from receipt_evidence.evidence import write
 
         result = run(task="x", cmd=["definitely_not_a_real_binary_xyz"],
                       watch_dir=self.tmp.name, declared_paths=[])
@@ -458,7 +458,7 @@ class TestSchema(unittest.TestCase):
 
     def test_an_unverified_receipt_with_no_declared_scope_validates(self):
         import jsonschema
-        from receipt.evidence import write
+        from receipt_evidence.evidence import write
 
         result = run(task="x", cmd=[sys.executable, "-c", "pass"],
                       watch_dir=self.tmp.name, declared_paths=None)
@@ -479,7 +479,7 @@ class TestEvidence(unittest.TestCase):
         # to collide on an identical filename and silently overwrite.
         from unittest import mock
 
-        from receipt.evidence import write
+        from receipt_evidence.evidence import write
 
         with mock.patch("time.strftime", return_value="20260101T000000Z"):
             path1 = write({"task": "first"}, self.tmp.name)
@@ -492,7 +492,7 @@ class TestEvidence(unittest.TestCase):
         self.assertEqual(json.loads(path2.read_text())["receipt"]["task"], "second")
 
     def test_written_record_carries_a_schema_version(self):
-        from receipt.evidence import SCHEMA_VERSION, write
+        from receipt_evidence.evidence import SCHEMA_VERSION, write
 
         path = write({"task": "x"}, self.tmp.name)
         record = json.loads(path.read_text())
@@ -504,7 +504,7 @@ class TestEvidence(unittest.TestCase):
         # whether it's the *right* hash.
         import hashlib
 
-        from receipt.evidence import write
+        from receipt_evidence.evidence import write
 
         path = write({"task": "x", "status": "pass"}, self.tmp.name)
         record = json.loads(path.read_text())
@@ -514,7 +514,7 @@ class TestEvidence(unittest.TestCase):
         self.assertEqual(record["sha256"], recomputed)
 
     def test_a_tampered_receipt_is_detectable_by_recomputing_the_hash(self):
-        from receipt.evidence import write
+        from receipt_evidence.evidence import write
 
         path = write({"task": "x", "status": "pass"}, self.tmp.name)
         record = json.loads(path.read_text())
