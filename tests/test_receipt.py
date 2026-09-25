@@ -50,6 +50,11 @@ def _entry(content_hash: str, mode: int = 0o644) -> dict:
     return {"hash": content_hash, "mode": mode}
 
 
+# Windows has no POSIX permission bits: chmod() only toggles read-only, so
+# stat() reports 0o666/0o444 regardless of what was set.
+POSIX_ONLY = unittest.skipIf(os.name == "nt", "POSIX permission bits")
+
+
 class TestSnapshot(unittest.TestCase):
     def test_diff_finds_added_modified_removed(self):
         before = {"a.txt": _entry("hash1"), "b.txt": _entry("hash2")}
@@ -59,6 +64,7 @@ class TestSnapshot(unittest.TestCase):
         self.assertEqual(result["modified"], ["a.txt"])
         self.assertEqual(result["removed"], ["b.txt"])
 
+    @POSIX_ONLY
     def test_snapshot_hashes_real_files_and_records_their_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = pathlib.Path(tmp) / "x.txt"
@@ -68,6 +74,16 @@ class TestSnapshot(unittest.TestCase):
             self.assertIn("x.txt", result)
             self.assertEqual(len(result["x.txt"]["hash"]), 64)  # sha256 hex digest length
             self.assertEqual(result["x.txt"]["mode"], 0o644)
+
+    def test_snapshot_keys_are_posix_paths_on_every_os(self):
+        # Declared scopes are written with forward slashes ("app/*.py"). On
+        # Windows, str(relative_path) used to yield "app\one.py", so every
+        # nested glob silently failed to match and a legitimate change read
+        # as an undeclared-file FAIL.
+        with tempfile.TemporaryDirectory() as tmp:
+            (pathlib.Path(tmp) / "app").mkdir()
+            (pathlib.Path(tmp) / "app" / "one.py").write_text("x")
+            self.assertEqual(list(snapshot(tmp)), ["app/one.py"])
 
     def test_a_rename_is_reported_as_a_rename_not_delete_plus_create(self):
         before = {"a.txt": _entry("samehash")}
@@ -118,6 +134,7 @@ class TestSnapshot(unittest.TestCase):
         self.assertEqual(result["modified"], ["a.txt"])
         self.assertEqual(result["mode_changed"], [])
 
+    @POSIX_ONLY
     def test_snapshot_records_the_real_permission_bits_of_an_executable_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = pathlib.Path(tmp) / "script.sh"
@@ -199,7 +216,7 @@ class TestRun(unittest.TestCase):
     def test_touching_only_declared_files_passes(self):
         result = run(
             task="write output.txt",
-            cmd=["python3", "-c", "open('output.txt', 'w').write('x')"],
+            cmd=[sys.executable, "-c", "open('output.txt', 'w').write('x')"],
             watch_dir=self.dir,
             declared_paths=["output.txt"],
         )
@@ -209,7 +226,7 @@ class TestRun(unittest.TestCase):
     def test_touching_an_undeclared_file_fails_and_names_it(self):
         result = run(
             task="write output.txt",
-            cmd=["python3", "-c", "open('output.txt', 'w').write('x'); open('sneaky.txt', 'w').write('y')"],
+            cmd=[sys.executable, "-c", "open('output.txt', 'w').write('x'); open('sneaky.txt', 'w').write('y')"],
             watch_dir=self.dir,
             declared_paths=["output.txt"],
         )
@@ -219,7 +236,7 @@ class TestRun(unittest.TestCase):
     def test_a_glob_pattern_in_declare_covers_a_whole_directory(self):
         result = run(
             task="write two files under app/",
-            cmd=["python3", "-c",
+            cmd=[sys.executable, "-c",
                  "import os; os.mkdir('app')"
                  "; open('app/one.py', 'w').write('x')"
                  "; open('app/two.py', 'w').write('y')"],
@@ -231,7 +248,7 @@ class TestRun(unittest.TestCase):
     def test_a_glob_pattern_does_not_match_a_file_outside_its_scope(self):
         result = run(
             task="write inside and outside app/",
-            cmd=["python3", "-c",
+            cmd=[sys.executable, "-c",
                  "import os; os.mkdir('app')"
                  "; open('app/one.py', 'w').write('x')"
                  "; open('outside.py', 'w').write('y')"],
@@ -245,7 +262,7 @@ class TestRun(unittest.TestCase):
         # Exact declarations and globs can be mixed in one --declare list.
         result = run(
             task="write a literal file and a globbed one",
-            cmd=["python3", "-c",
+            cmd=[sys.executable, "-c",
                  "import os; os.mkdir('app')"
                  "; open('README.md', 'w').write('x')"
                  "; open('app/one.py', 'w').write('y')"],
@@ -257,7 +274,7 @@ class TestRun(unittest.TestCase):
     def test_no_declared_scope_is_unverified_not_a_silent_pass(self):
         result = run(
             task="do something",
-            cmd=["python3", "-c", "open('anything.txt', 'w').write('x')"],
+            cmd=[sys.executable, "-c", "open('anything.txt', 'w').write('x')"],
             watch_dir=self.dir,
             declared_paths=None,
         )
@@ -270,7 +287,7 @@ class TestRun(unittest.TestCase):
         (pathlib.Path(self.dir) / "output.txt").write_text("x")
         result = run(
             task="rename output.txt to final.txt",
-            cmd=["python3", "-c", "import os; os.rename('output.txt', 'final.txt')"],
+            cmd=[sys.executable, "-c", "import os; os.rename('output.txt', 'final.txt')"],
             watch_dir=self.dir,
             declared_paths=["output.txt", "final.txt"],
         )
@@ -284,13 +301,14 @@ class TestRun(unittest.TestCase):
         (pathlib.Path(self.dir) / "output.txt").write_text("x")
         result = run(
             task="rename output.txt",
-            cmd=["python3", "-c", "import os; os.rename('output.txt', 'sneaky.txt')"],
+            cmd=[sys.executable, "-c", "import os; os.rename('output.txt', 'sneaky.txt')"],
             watch_dir=self.dir,
             declared_paths=["output.txt"],
         )
         self.assertEqual(result["status"], FAIL)
         self.assertIn("sneaky.txt (renamed from output.txt)", result["detail"])
 
+    @POSIX_ONLY
     def test_chmod_on_an_undeclared_file_fails_where_it_used_to_be_invisible(self):
         # This is the exact gap the audit flagged: a permission-only change
         # (content byte-identical) previously produced 0 touched files and
@@ -299,7 +317,7 @@ class TestRun(unittest.TestCase):
         (pathlib.Path(self.dir) / "secret.env").write_text("SECRET=x")
         result = run(
             task="do something unrelated",
-            cmd=["python3", "-c", "import os; os.chmod('secret.env', 0o777)"],
+            cmd=[sys.executable, "-c", "import os; os.chmod('secret.env', 0o777)"],
             watch_dir=self.dir,
             declared_paths=[],
         )
@@ -307,11 +325,12 @@ class TestRun(unittest.TestCase):
         self.assertIn("secret.env (permissions changed, content unchanged)", result["detail"])
         self.assertEqual(result["changes"]["mode_changed"], ["secret.env"])
 
+    @POSIX_ONLY
     def test_chmod_on_a_declared_file_passes(self):
         (pathlib.Path(self.dir) / "build.sh").write_text("#!/bin/sh\necho hi")
         result = run(
             task="make build.sh executable",
-            cmd=["python3", "-c", "import os; os.chmod('build.sh', 0o755)"],
+            cmd=[sys.executable, "-c", "import os; os.chmod('build.sh', 0o755)"],
             watch_dir=self.dir,
             declared_paths=["build.sh"],
         )
@@ -319,7 +338,7 @@ class TestRun(unittest.TestCase):
         self.assertEqual(result["changes"]["mode_changed"], ["build.sh"])
 
     def test_command_that_touches_nothing_and_declares_nothing_passes(self):
-        result = run(task="no-op", cmd=["python3", "-c", "pass"],
+        result = run(task="no-op", cmd=[sys.executable, "-c", "pass"],
                      watch_dir=self.dir, declared_paths=[])
         self.assertEqual(result["status"], PASS)
         self.assertEqual(result["changes"]["added"], [])
@@ -341,7 +360,7 @@ class TestRun(unittest.TestCase):
     def test_a_nonexistent_watch_dir_produces_a_receipt_instead_of_crashing(self):
         result = run(
             task="run in a directory that isn't there",
-            cmd=["python3", "-c", "pass"],
+            cmd=[sys.executable, "-c", "pass"],
             watch_dir=str(pathlib.Path(self.dir) / "does" / "not" / "exist"),
             declared_paths=[],
         )
@@ -368,7 +387,7 @@ class TestRun(unittest.TestCase):
         # shaped API key, and it landed unredacted in the written receipt.
         result = run(
             task="run a script that happens to print its own env",
-            cmd=["python3", "-c", "print('API_KEY=sk-supersecret12345')"],
+            cmd=[sys.executable, "-c", "print('API_KEY=sk-supersecret12345')"],
             watch_dir=self.dir,
             declared_paths=[],
         )
@@ -378,7 +397,7 @@ class TestRun(unittest.TestCase):
     def test_non_utf8_stdout_does_not_crash_the_run(self):
         result = run(
             task="emit garbage bytes",
-            cmd=["python3", "-c", "import sys; sys.stdout.buffer.write(b'\\xff\\xfe garbage')"],
+            cmd=[sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'\\xff\\xfe garbage')"],
             watch_dir=self.dir,
             declared_paths=[],
         )
@@ -413,7 +432,7 @@ class TestSchema(unittest.TestCase):
         from receipt.evidence import write
 
         result = run(task="write output.txt",
-                      cmd=["python3", "-c", "open('output.txt', 'w').write('x')"],
+                      cmd=[sys.executable, "-c", "open('output.txt', 'w').write('x')"],
                       watch_dir=self.tmp.name, declared_paths=["output.txt"])
         path = write(result, pathlib.Path(self.tmp.name) / "receipts")
         jsonschema.validate(json.loads(path.read_text()), self._schema())
@@ -423,7 +442,7 @@ class TestSchema(unittest.TestCase):
         from receipt.evidence import write
 
         (pathlib.Path(self.tmp.name) / "a.txt").write_text("x")
-        result = run(task="rename", cmd=["python3", "-c", "import os; os.rename('a.txt', 'b.txt')"],
+        result = run(task="rename", cmd=[sys.executable, "-c", "import os; os.rename('a.txt', 'b.txt')"],
                       watch_dir=self.tmp.name, declared_paths=["a.txt"])
         path = write(result, pathlib.Path(self.tmp.name) / "receipts")
         jsonschema.validate(json.loads(path.read_text()), self._schema())
@@ -441,7 +460,7 @@ class TestSchema(unittest.TestCase):
         import jsonschema
         from receipt.evidence import write
 
-        result = run(task="x", cmd=["python3", "-c", "pass"],
+        result = run(task="x", cmd=[sys.executable, "-c", "pass"],
                       watch_dir=self.tmp.name, declared_paths=None)
         path = write(result, pathlib.Path(self.tmp.name) / "receipts")
         jsonschema.validate(json.loads(path.read_text()), self._schema())
