@@ -13,6 +13,7 @@ import hashlib
 import os
 import pathlib
 import stat
+from concurrent.futures import ThreadPoolExecutor
 
 # Directories never worth snapshotting: version control internals and the
 # tool's own output would make every run look like it touched itself.
@@ -22,42 +23,61 @@ _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "receipts"}
 def snapshot(root: str | pathlib.Path) -> dict[str, dict]:
     """Returns {relpath: {"hash": sha256, "mode": permission bits}}."""
     root = pathlib.Path(root)
+    found: list[tuple[str, int]] = []
+    stack = [str(root)]
+    while stack:
+        try:
+            entries = os.scandir(stack.pop())
+        except OSError:
+            continue
+        with entries:
+            for entry in entries:
+                if entry.is_dir(follow_symlinks=False):
+                    if entry.name not in _SKIP_DIRS:
+                        stack.append(entry.path)
+                    continue
+                try:
+                    st = entry.stat()
+                except OSError:
+                    # Gone by the time we got to it (a temp file, a race) --
+                    # skip rather than fail the whole snapshot over one file.
+                    continue
+                if not stat.S_ISREG(st.st_mode):
+                    # A FIFO, socket, or device node isn't something `open()`
+                    # can be trusted to return from: a FIFO with no writer on
+                    # the other end blocks forever. Content hashing only makes
+                    # sense for regular files anyway.
+                    continue
+                found.append((entry.path, stat.S_IMODE(st.st_mode)))
+
+    # Hashing is bound by opening files, not by sha256 -- on Windows each
+    # open is also scanned by Defender -- and hashlib releases the GIL, so a
+    # thread pool is most of the speedup. Measured on home-assistant/core
+    # (28k files): 39s for a no-op command before, see README for after.
+    with ThreadPoolExecutor(max_workers=min(32, (os.cpu_count() or 4) * 4)) as pool:
+        hashes = list(pool.map(_try_hash, (path for path, _ in found)))
+
     files: dict[str, dict] = {}
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
-        for name in filenames:
-            path = pathlib.Path(dirpath) / name
-            # .as_posix(), not str(): declared scopes are always written
-            # with forward slashes (README examples, tests -- "app/*.py"),
-            # and core._is_declared glob-matches against this string
-            # directly. str() on Windows returns backslashes, which makes
-            # every multi-directory glob silently fail to match and turns
-            # legitimate declared changes into a false `fail`.
-            rel = path.relative_to(root).as_posix()
-            try:
-                st = path.stat()
-            except OSError:
-                # Gone by the time we got to it (a temp file, a race) --
-                # skip rather than fail the whole snapshot over one file.
-                continue
-            if not stat.S_ISREG(st.st_mode):
-                # A FIFO, socket, or device node isn't something `open()`
-                # can be trusted to return from: a FIFO with no writer on
-                # the other end blocks forever, turning one weird file
-                # into a snapshot that never completes. Content hashing
-                # only makes sense for regular files anyway -- skip it,
-                # the same way a file that vanished mid-walk is skipped.
-                continue
-            try:
-                content_hash = _hash_file(path)
-            except OSError:
-                continue
-            mode = stat.S_IMODE(st.st_mode)
-            files[rel] = {"hash": content_hash, "mode": mode}
+    for (path, mode), content_hash in zip(found, hashes):
+        if content_hash is None:
+            continue
+        # .as_posix(), not str(): declared scopes are always written with
+        # forward slashes ("app/*.py"), and core._is_declared glob-matches
+        # against this string directly. str() on Windows returns
+        # backslashes, which turns legitimate declared changes into a
+        # false `fail`.
+        files[pathlib.Path(path).relative_to(root).as_posix()] = {"hash": content_hash, "mode": mode}
     return files
 
 
-def _hash_file(path: pathlib.Path) -> str:
+def _try_hash(path: str) -> str | None:
+    try:
+        return _hash_file(path)
+    except OSError:
+        return None
+
+
+def _hash_file(path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 16), b""):

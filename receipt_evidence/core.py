@@ -7,6 +7,7 @@ around this one function.
 from __future__ import annotations
 
 import fnmatch
+import pathlib
 import subprocess
 import time
 
@@ -31,6 +32,29 @@ def _is_declared(path: str, declared: set[str]) -> bool:
     if path in declared:
         return True
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in declared)
+
+
+# https://bford.info/cachedir/ -- written by ruff, pytest, mypy, Cargo and
+# others into their own cache directories.
+_CACHEDIR_SIGNATURE = b"Signature: 8a477f597d28d172789f06886806bc55"
+
+
+def _cache_dirs(watch_dir: str, paths) -> list[str]:
+    """Directories (relative, posix) carrying a valid CACHEDIR.TAG. A tool's
+    cache changing is not the tool reaching outside its scope; `ruff format
+    src` writing .ruff_cache/ would otherwise fail every receipt."""
+    found = []
+    for p in paths:
+        head, _, name = p.rpartition("/")
+        if name != "CACHEDIR.TAG" or not head:  # a tagged *root* would hide everything
+            continue
+        try:
+            with open(pathlib.Path(watch_dir) / p, "rb") as f:
+                if f.read(len(_CACHEDIR_SIGNATURE)) == _CACHEDIR_SIGNATURE:
+                    found.append(head)
+        except OSError:
+            continue
+    return found
 
 
 def run(task: str, cmd: list[str], watch_dir: str = ".",
@@ -68,6 +92,7 @@ def run(task: str, cmd: list[str], watch_dir: str = ".",
             "declared_paths": declared_paths,
             "changes": {"added": [], "modified": [], "removed": [], "renamed": [], "mode_changed": []},
             "unexpected": [],
+            "cache": [],
             "status": model.FAIL,
             "detail": f"could not launch the command: {exc}",
         }
@@ -93,19 +118,25 @@ def run(task: str, cmd: list[str], watch_dir: str = ".",
             return f"{p} (permissions changed, content unchanged)"
         return p
 
+    caches = _cache_dirs(watch_dir, set(before) | set(after))
+    cache = [p for p in touched if any(p.startswith(d + "/") for d in caches)]
+    touched = [p for p in touched if p not in set(cache)]
+    cache_note = f" (+{len(cache)} in tagged cache directories)" if cache else ""
+
     if declared_paths is None:
         status = model.UNVERIFIED
         unexpected: list[str] = []
-        detail = f"{len(touched)} file(s) touched; no declared scope to check against"
+        detail = f"{len(touched)} file(s) touched; no declared scope to check against{cache_note}"
     else:
         declared = set(declared_paths)
         unexpected = [p for p in touched if not _is_declared(p, declared)]
         if unexpected:
             status = model.FAIL
-            detail = f"touched {len(unexpected)} undeclared file(s): {', '.join(_annotate(p) for p in unexpected)}"
+            detail = (f"touched {len(unexpected)} undeclared file(s): "
+                      f"{', '.join(_annotate(p) for p in unexpected)}{cache_note}")
         else:
             status = model.PASS
-            detail = f"touched only what was declared ({len(touched)} file(s))"
+            detail = f"touched only what was declared ({len(touched)} file(s)){cache_note}"
 
     return {
         "task": task,
@@ -118,6 +149,7 @@ def run(task: str, cmd: list[str], watch_dir: str = ".",
         "declared_paths": declared_paths,
         "changes": changes,
         "unexpected": unexpected,
+        "cache": cache,
         "status": status,
         "detail": detail,
     }
