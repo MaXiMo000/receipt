@@ -126,9 +126,9 @@ Wire it into `.claude/settings.json` (a project) or
 ```json
 {
   "hooks": {
-    "PreToolUse": [{ "matcher": "Edit|Write|Bash",
+    "PreToolUse": [{ "matcher": "Edit|Write|Bash|PowerShell",
       "hooks": [{ "type": "command", "command": "custody-hook" }] }],
-    "PostToolUse": [{ "matcher": "Edit|Write|Bash",
+    "PostToolUse": [{ "matcher": "Edit|Write|Bash|PowerShell",
       "hooks": [{ "type": "command", "command": "custody-hook" }] }]
   }
 }

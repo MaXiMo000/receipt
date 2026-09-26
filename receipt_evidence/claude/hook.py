@@ -25,7 +25,8 @@ from . import core
 # Bash gets no declared scope at all (see core.bash_receipt) but is still
 # hooked, so "what changed" is on record even when "was it in scope" isn't
 # an answerable question -- see README.md's "What custody does not do".
-WATCHED_TOOLS = {"Edit", "Write", "Bash"}
+# PowerShell: Claude Code's other shell tool, same shape as Bash.
+WATCHED_TOOLS = {"Edit", "Write", "Bash", "PowerShell"}
 
 
 def _state_dir(cwd: str) -> pathlib.Path:

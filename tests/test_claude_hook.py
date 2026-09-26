@@ -270,6 +270,19 @@ class TestBashRoundTrip(unittest.TestCase):
         # read null on a real Bash receipt, not a guessed True/False.
         self.assertIsNone(payload["tool_reported_success"])
 
+    def test_powershell_gets_a_receipt_like_bash(self):
+        pre = {"session_id": "s1", "cwd": self.cwd, "hook_event_name": "PreToolUse",
+               "tool_name": "PowerShell", "tool_use_id": "toolu_ps_1",
+               "tool_input": {"command": "Add-Content existing.py 'y = 2'"}}
+        _run_hook(pre)
+        with open(pathlib.Path(self.cwd, "existing.py"), "a") as f:
+            f.write("y = 2\n")
+        _run_hook({**pre, "hook_event_name": "PostToolUse",
+                   "tool_response": {"stdout": "", "stderr": "", "interrupted": False, "isImage": False}})
+        path = pathlib.Path(self.cwd, ".custody", "receipts", "toolu_ps_1.json")
+        payload = json.loads(path.read_text())["payload"]
+        self.assertEqual((payload["tool_name"], payload["changes"]["modified"]), ("PowerShell", ["existing.py"]))
+
 
 if __name__ == "__main__":
     unittest.main()
