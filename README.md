@@ -76,6 +76,19 @@ What it does:
    `receipts/<timestamp>-<random>.json` with a sha256 of the record.
    Shape: [`schema/receipt.schema.json`](schema/receipt.schema.json).
 
+**Tool caches.** A directory carrying a
+[`CACHEDIR.TAG`](https://bford.info/cachedir/) with the spec's signature --
+ruff, pytest, mypy and Cargo all write one -- is a tool's own cache.
+Changes inside it are listed under `cache` in the receipt and in the
+verdict line, never judged against the scope: `ruff format src` on flask
+reads `[PASS] touched only what was declared (1 file(s)) (+4 in tagged
+cache directories)` instead of failing on `.ruff_cache/`. A tag without
+the signature hides nothing.
+
+**Speed.** Every file is hashed before and after, on a thread pool.
+home-assistant/core (28k files) costs about 10 s per run on Windows,
+down from 39 s; point `--dir` at the smallest tree that bounds the task.
+
 **What `touched` means:** added, removed, modified, renamed (either end),
 or permissions changed. A rename or chmod outside the scope is a real
 `fail`, named clearly -- `sneaky.txt (renamed from output.txt)`.

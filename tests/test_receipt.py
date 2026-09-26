@@ -223,6 +223,25 @@ class TestRun(unittest.TestCase):
         self.assertEqual(result["status"], PASS)
         self.assertEqual(result["unexpected"], [])
 
+    def test_a_tagged_cache_directory_is_recorded_not_judged(self):
+        """`ruff format src` on flask wrote .ruff_cache/ and failed the
+        receipt. Cache dirs carrying a CACHEDIR.TAG are listed apart; a
+        tag without the spec's signature hides nothing."""
+        script = (
+            "import os\n"
+            "os.makedirs('.ruff_cache/0.16', exist_ok=True)\n"
+            "open('.ruff_cache/CACHEDIR.TAG','w').write('Signature: 8a477f597d28d172789f06886806bc55\\n')\n"
+            "open('.ruff_cache/0.16/abc','w').write('x')\n"
+            "os.makedirs('fake', exist_ok=True)\n"
+            "open('fake/CACHEDIR.TAG','w').write('not the signature')\n"
+            "open('fake/payload','w').write('y')\n"
+            "open('src.py','w').write('z')\n")
+        result = run(task="format", cmd=[sys.executable, "-c", script],
+                     watch_dir=self.dir, declared_paths=["src.py"])
+        self.assertEqual(sorted(result["cache"]), [".ruff_cache/0.16/abc", ".ruff_cache/CACHEDIR.TAG"])
+        self.assertEqual(sorted(result["unexpected"]), ["fake/CACHEDIR.TAG", "fake/payload"])
+        self.assertEqual(result["status"], FAIL)
+
     def test_touching_an_undeclared_file_fails_and_names_it(self):
         result = run(
             task="write output.txt",

@@ -84,6 +84,11 @@
           "items": { "type": "string" },
           "description": "Touched paths not covered by declared_paths -- always [] when status is pass or unverified."
         },
+        "cache": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Touched paths inside a directory with a valid CACHEDIR.TAG (ruff, pytest, mypy, Cargo). Recorded, never judged against the declared scope. Absent in receipts written before 0.3.0."
+        },
         "status": {
           "type": "string",
           "enum": ["pass", "fail", "unverified"],
