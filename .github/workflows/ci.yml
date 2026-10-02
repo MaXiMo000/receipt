@@ -31,6 +31,7 @@ jobs:
       - run: python tests/test_providence.py
       - run: python tests/test_claude_core.py
       - run: python tests/test_claude_hook.py
+      - run: python tests/test_ledger.py
       - run: python tests/test_browser.py
 
   test-live:
@@ -46,6 +47,28 @@ jobs:
       - run: pip install -e . playwright
       - run: python -m playwright install --with-deps chromium
       - run: python tests/test_browser_live.py
+
+  action:
+    # The action itself, on receipts made here: one passing, one failing.
+    # `fail: false` so the job checks the summary rather than stopping on it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - run: |
+          pip install -q .
+          mkdir -p work && cd work
+          receipt run --task "write a" --declare a.txt --out ../demo-receipts -- python -c "open('a.txt','w').write('x')"
+          receipt run --task "write b, touch c" --declare b.txt --out ../demo-receipts -- python -c "open('b.txt','w').write('x'); open('c.txt','w').write('y')" || true
+      - uses: ./
+        id: receipt
+        with:
+          directory: demo-receipts
+          comment: "false"
+          fail: "false"
+          install-from: .
+      - run: |
+          test "${{ steps.receipt.outputs.ok }}" = "false"
+          grep -q "1 pass, 1 fail" receipt-summary.md
 
   package:
     # Build and install the wheel on every commit, not only at release -- a

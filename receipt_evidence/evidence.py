@@ -16,7 +16,7 @@ import time
 SCHEMA_VERSION = 1
 
 
-def write(result: dict, out_dir: str | pathlib.Path) -> pathlib.Path:
+def write(result: dict, out_dir: str | pathlib.Path, sign_key: str | None = None) -> pathlib.Path:
     out_dir = pathlib.Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -40,4 +40,8 @@ def write(result: dict, out_dir: str | pathlib.Path) -> pathlib.Path:
         "written_at": time.time(),
     }
     path.write_text(json.dumps(record, indent=2, sort_keys=True, default=str), encoding="utf-8")
+    # Chained into the directory's ledger (and signed, with a key), so the
+    # set of receipts can't be edited, thinned out or added to unnoticed.
+    from .ledger import append
+    append(out_dir, path, key=sign_key)
     return path

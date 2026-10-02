@@ -194,6 +194,52 @@ bundle wasn't regenerated from scratch.
 
 ---
 
+## 5. A record you can trust: the signed ledger
+
+A receipt's sha256 proves its bytes match the hash inside it -- and anyone
+who edits the file can rewrite that hash too. So every receipt written,
+by `receipt run` or by `custody-hook`, also gets a line in the directory's
+`ledger.jsonl`: its file name, its bytes' sha256, and the sha256 of the
+previous line. With a key, the ledger is signed after every append using
+`ssh-keygen -Y sign` -- the mechanism git uses to sign commits, with keys
+you already have, and no Python dependency.
+
+```bash
+export RECEIPT_SIGNING_KEY=~/.ssh/receipts_ed25519      # or: receipt run --sign KEY
+receipt verify receipts/ --allowed-signers allowed_signers
+```
+
+Measured with real keys:
+
+| what was done to the directory | `receipt verify` |
+|---|---|
+| nothing | PASS, signed by `ci@example.com` |
+| one receipt edited | FAIL, names it |
+| one receipt deleted | FAIL, names it |
+| one added afterwards | FAIL, names it |
+| a receipt edited **and the whole ledger rebuilt consistently** | PASS without `--allowed-signers`; **FAIL** with it |
+| re-signed with someone else's key | FAIL: not in the allowed signers |
+
+The fifth row is the point: the chain alone catches every accident and
+any edit that doesn't bother covering its tracks, but someone who can
+write the directory can rebuild it. Only the signature -- a key they don't
+hold -- stops that, so verify with `--allowed-signers` whenever it matters.
+
+## 6. On the pull request
+
+```yaml
+- uses: MaXiMo000/receipt@v0.4.0
+  with:
+    directory: .custody/receipts          # where custody-hook wrote them
+    allowed-signers: .github/allowed_signers
+```
+
+One comment on the PR, updated in place, plus the job summary: how many
+receipts passed, failed or went unverified, whether the ledger is intact
+and who signed it, and every receipt -- failures first. `receipt summary
+DIR` prints the same Markdown anywhere. The step fails when a receipt
+failed or the record isn't intact (`fail: false` to only report).
+
 ## Redaction, and what it doesn't mean
 
 Captured stdout/stderr, argv, URLs and POST bodies are swept for
