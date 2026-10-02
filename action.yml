@@ -1,0 +1,90 @@
+name: receipt summary
+description: Summarise an agent's or a command's receipts on the pull request -- what it touched, whether it matched what it said, and whether the record is intact.
+author: MaXiMo000
+
+branding:
+  icon: check-square
+  color: green
+
+inputs:
+  directory:
+    description: The receipts directory (custody-hook writes `.custody/receipts`, `receipt run` writes `receipts`).
+    required: false
+    default: .custody/receipts
+  allowed-signers:
+    description: "An allowed_signers file; when given, the ledger signature must verify."
+    required: false
+    default: ""
+  comment:
+    description: "Post (or update) one comment on the pull request. Needs pull-requests: write."
+    required: false
+    default: "true"
+  fail:
+    description: Fail the step when a receipt failed or the record is not intact.
+    required: false
+    default: "true"
+  version:
+    description: receipt-evidence version to install; latest when empty.
+    required: false
+    default: ""
+  install-from:
+    description: Install from this path instead of PyPI (lets CI test the action itself).
+    required: false
+    default: ""
+
+outputs:
+  ok:
+    description: "true when every receipt passed or was unverified and the record is intact."
+    value: ${{ steps.summary.outputs.ok }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install receipt
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        FROM: ${{ inputs.install-from }}
+      run: |
+        if [ -n "$FROM" ]; then python3 -m pip install --quiet --disable-pip-version-check "$FROM"
+        else python3 -m pip install --quiet --disable-pip-version-check "receipt-evidence${VERSION:+==$VERSION}"; fi
+
+    - name: Summarise
+      id: summary
+      shell: bash
+      env:
+        DIR: ${{ inputs.directory }}
+        SIGNERS: ${{ inputs.allowed-signers }}
+      run: |
+        set -uo pipefail
+        args=(summary "$DIR")
+        if [ -n "$SIGNERS" ]; then args+=(--allowed-signers "$SIGNERS"); fi
+        if receipt "${args[@]}" > receipt-summary.md; then ok=true; else ok=false; fi
+        echo "ok=$ok" >> "$GITHUB_OUTPUT"
+        cat receipt-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Comment on the pull request
+      if: inputs.comment == 'true' && github.event.pull_request.number
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PR: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        marker='<!-- receipt-summary -->'
+        { echo "$marker"; cat receipt-summary.md; } > receipt-comment.md
+        existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+          --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -1)
+        if [ -n "$existing" ]; then
+          gh api -X PATCH "repos/$REPO/issues/comments/$existing" -F body=@receipt-comment.md >/dev/null
+        else
+          gh pr comment "$PR" --repo "$REPO" --body-file receipt-comment.md
+        fi
+
+    - name: Fail when the receipts say so
+      if: inputs.fail == 'true' && steps.summary.outputs.ok != 'true'
+      shell: bash
+      run: |
+        echo "::error::receipt: a receipt failed, or the record is not intact -- see the summary"
+        exit 1
