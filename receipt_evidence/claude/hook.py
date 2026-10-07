@@ -133,7 +133,14 @@ def post_tool_use(event: dict) -> None:
     receipts_dir = _receipts_dir(cwd)
     receipts_dir.mkdir(parents=True, exist_ok=True)
     bundle = make_bundle("custody", payload)
-    (receipts_dir / f"{tool_use_id}.json").write_text(json.dumps(bundle, indent=2))
+    path = receipts_dir / f"{tool_use_id}.json"
+    path.write_text(json.dumps(bundle, indent=2), encoding="utf-8")
+    from ..ledger import LedgerError, append
+    try:
+        append(receipts_dir, path)
+    except LedgerError as exc:
+        # The hook must not break the agent's tool call; say it loudly.
+        sys.stderr.write(f"custody-hook: {exc}\n")
 
 
 _HANDLERS = {"PreToolUse": pre_tool_use, "PostToolUse": post_tool_use}
