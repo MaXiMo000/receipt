@@ -144,5 +144,4 @@ dataclass are a *related but different* pattern -- a versioned shape for
 one item, not a content-hashed bundle on disk. A `Finding` could
 reasonably become the `payload` of a Providence single-file bundle, or one
 `items[]` entry's evidence in a directory bundle, but that unification
-isn't done here either. Naming that relationship without forcing it is
-deliberate, not an oversight -- see the parent portfolio's `HANDOFF.md` §7.
+isn't done here either; the relationship is named without being forced.

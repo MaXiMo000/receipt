@@ -32,9 +32,7 @@ providence = "receipt_evidence.providence.cli:main"
 custody-hook = "receipt_evidence.claude.hook:main"
 
 [build-system]
-# 77 is the floor for PEP 639 (`license = "MIT"` as an SPDX expression) --
-# a lesson already paid for in a sibling project's own release workflow,
-# applied here before it bites this one too.
+# 77 is the floor for PEP 639 (`license = "MIT"` as an SPDX expression).
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 

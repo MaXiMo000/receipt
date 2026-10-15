@@ -1,7 +1,6 @@
 """python3 tests/test_providence.py
 
-No framework -- assert-based, run as __main__, matching the rest of the
-portfolio's test style (see satchel/receipt/invariant).
+No framework -- assert-based, run as __main__, like the other tests here.
 """
 from __future__ import annotations
 

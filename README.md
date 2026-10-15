@@ -5,6 +5,8 @@
 
 **Verified receipts for what actually happened -- not what was claimed.**
 
+<p align="center"><img src="https://raw.githubusercontent.com/MaXiMo000/receipt/main/docs/demo.svg" alt="receipt failing a command that touched an undeclared file, then detecting that the receipt was edited" width="100%"></p>
+
 A shell command, an AI agent's tool call, a click in a browser: each one
 comes with a self-report ("I edited auth.py", "Saved!"). `receipt` checks
 the self-report against reality, independently, and writes down what it

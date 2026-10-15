@@ -6,9 +6,8 @@ what a real browser really did, not just that fake event objects fan out
 to the right handlers (test_capture.py already covers that).
 
 Requires `pip install playwright && playwright install chromium` --
-skipped cleanly (not failed) if either isn't available, the same "can't
-verify, don't guess" discipline as every unverified path elsewhere in
-this portfolio.
+skipped cleanly (not failed) if either isn't available: can't verify,
+don't guess.
 """
 from __future__ import annotations
 
@@ -137,8 +136,8 @@ class TestCaptureLive(unittest.TestCase):
 
     def test_a_real_credential_a_real_browser_actually_sent_is_redacted(self):
         """A real Chromium, a real fetch, with a real (test) API key in the
-        URL and a real password in the JSON POST body -- the exact leak
-        shape the audit found capture() had zero redaction for. Checks
+        URL and a real password in the JSON POST body -- the leak
+        shape capture() must redact. Checks
         the captured output, not the page's own JS, since the whole
         point of this package is not trusting self-report."""
         with capture(self.page, task="login") as c:

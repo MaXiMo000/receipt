@@ -2,8 +2,8 @@
 receipt.
 
 Not a guarantee -- a regex sweep can't catch every shape a secret takes --
-but it closes the exact failure mode found live during the portfolio audit:
-a wrapped command's own stdout/stderr echoing a real credential
+but it closes the most common leak: a wrapped command's own stdout/stderr
+echoing a real credential
 (`API_KEY=sk-supersecret12345`) landed verbatim in the receipt JSON on disk.
 Receipts are meant to be kept and handed to someone else as evidence; the
 evidence artifact itself must not be a credential-leak vector.
@@ -15,8 +15,8 @@ import re
 MASK = "[REDACTED]"
 
 # key=value / key: value pairs where the key name says "this is a secret" --
-# the most common real leak shape (the exact one confirmed live in the
-# audit: an env var echoed by the wrapped command). The key itself may be
+# the most common real leak shape (an env var echoed by the wrapped
+# command). The key itself may be
 # quoted too (`"password": "..."`) -- a JSON request body, the shape
 # `clicked`'s captured POST data is in more often than not.
 _KEYED = re.compile(

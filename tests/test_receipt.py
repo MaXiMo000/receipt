@@ -329,7 +329,7 @@ class TestRun(unittest.TestCase):
 
     @POSIX_ONLY
     def test_chmod_on_an_undeclared_file_fails_where_it_used_to_be_invisible(self):
-        # This is the exact gap the audit flagged: a permission-only change
+        # A permission-only change
         # (content byte-identical) previously produced 0 touched files and
         # a silent PASS. A command flipping a file executable, or loosening
         # permissions on something sensitive, should not be invisible.
@@ -401,9 +401,8 @@ class TestRun(unittest.TestCase):
         self.assertIn("could not launch", json.loads(written[0].read_text())["receipt"]["detail"])
 
     def test_a_command_that_echoes_a_secret_does_not_leak_it_into_the_receipt(self):
-        # Regression test for the exact scenario confirmed live during the
-        # portfolio audit: a wrapped command's own stdout printed a real-
-        # shaped API key, and it landed unredacted in the written receipt.
+        # A wrapped command's own stdout prints a real-shaped API key; it must
+        # not land unredacted in the written receipt.
         result = run(
             task="run a script that happens to print its own env",
             cmd=[sys.executable, "-c", "print('API_KEY=sk-supersecret12345')"],
