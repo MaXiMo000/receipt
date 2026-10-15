@@ -230,7 +230,7 @@ hold -- stops that, so verify with `--allowed-signers` whenever it matters.
 ## 6. On the pull request
 
 ```yaml
-- uses: MaXiMo000/receipt@v0.4.0
+- uses: MaXiMo000/receipt@v0.4.1
   with:
     directory: .custody/receipts          # where custody-hook wrote them
     allowed-signers: .github/allowed_signers
