@@ -4,6 +4,6 @@
 receipt records exactly what it touched, but there was nothing to check that
 against, so calling it a pass would claim more than was actually verified.
 """
-PASS = "pass"
+PASS = "pass"  # noqa: S105 - a status, not a password
 FAIL = "fail"
 UNVERIFIED = "unverified"

@@ -58,7 +58,7 @@ def snapshot(root: str | pathlib.Path) -> dict[str, dict]:
         hashes = list(pool.map(_try_hash, (path for path, _ in found)))
 
     files: dict[str, dict] = {}
-    for (path, mode), content_hash in zip(found, hashes):
+    for (path, mode), content_hash in zip(found, hashes, strict=True):
         if content_hash is None:
             continue
         # .as_posix(), not str(): declared scopes are always written with
@@ -128,7 +128,7 @@ def diff(before: dict[str, dict], after: dict[str, dict]) -> dict[str, list]:
         # Deterministic pairing when duplicate-content files move at once:
         # sort both sides, zip pairs off in order rather than guessing
         # which specific old path became which specific new path.
-        for old_p, new_p in zip(sorted(old_paths), sorted(new_paths)):
+        for old_p, new_p in zip(sorted(old_paths), sorted(new_paths), strict=False):
             renamed.append({"from": old_p, "to": new_p})
             still_removed.discard(old_p)
             still_added.discard(new_p)
