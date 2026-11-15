@@ -9,6 +9,16 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: pip install ruff==0.16.8
+      - run: ruff check .
+
   test:
     # jsonschema is installed here only, as a test-only tool for
     # TestSchema -- receipt-evidence itself stays zero-dependency.
@@ -17,10 +27,10 @@ jobs:
       fail-fast: false
       matrix:
         # 3.10 is the floor declared in pyproject; test the floor, not just today.
-        python: ["3.10", "3.13"]
+        python: ["3.10", "3.13", "3.14"]
         # Windows is in the matrix because a backslash-path bug shipped in
         # 0.1.1 that only Windows could have caught.
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
