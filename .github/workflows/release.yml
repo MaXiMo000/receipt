@@ -19,7 +19,7 @@ jobs:
           python-version: "3.13"
       - run: pip install -e . jsonschema
       - run: |
-          for t in tests/test_receipt.py tests/test_providence.py tests/test_claude_core.py tests/test_claude_hook.py tests/test_browser.py; do
+          for t in tests/test_receipt.py tests/test_providence.py tests/test_claude_core.py tests/test_claude_hook.py tests/test_agent_hooks.py tests/test_browser.py; do
             python "$t"
           done
 
