@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 - 2026-11-18
 
 - `custody-hook` supports Codex: shell commands are recorded, and an `apply_patch` fails if it changed a file its patch didn't name.
 - `custody-hook` supports Cursor: `afterFileEdit` checks each edit is on disk, and shell commands are recorded against a rolling snapshot.
