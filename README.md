@@ -15,7 +15,7 @@ found in a tamper-evident file you can hand to someone else.
 | what happened | how you capture it | what gets checked |
 |---|---|---|
 | a shell command | `receipt run --declare ... -- cmd` | every file it touched, against the scope you declared |
-| an AI agent's `Edit`/`Write`/`Bash` call | the `custody-hook` Claude Code hook | the bytes on disk are exactly what the tool says it wrote |
+| an AI agent's file edit or shell command | the `custody-hook` hook, for Claude Code, Codex or Cursor | the bytes on disk are exactly what the tool says it wrote |
 | one browser interaction | `with capture(page): ...` (Playwright) | every network request it really made, and optionally the files it caused |
 
 Every receipt is JSON with a sha256 over its content -- the
@@ -99,7 +99,9 @@ or permissions changed. A rename or chmod outside the scope is a real
 *within `--dir`*." A write to `/tmp`, `~` or a sibling directory is
 invisible here. Point `--dir` at the smallest tree that bounds the task.
 
-## 2. AI agent tool calls: the Claude Code hook
+## 2. AI coding agents: Claude Code, Codex, Cursor
+
+### Claude Code
 
 `custody-hook` runs on every `Edit`, `Write` and `Bash` call a Claude Code
 session makes, and writes one receipt per call to `.custody/receipts/`.
@@ -143,6 +145,75 @@ silently. Use `pipx install receipt-evidence`, or put the absolute path in
 
 The hook never blocks a tool call and always exits 0: it's a witness, not
 a gate. Verified end to end in a real Claude Code session.
+
+### Codex
+
+Codex sends the same `PreToolUse`/`PostToolUse` events, so the same command
+works. Shell commands are recorded like Claude Code's `Bash`. File edits
+arrive as an `apply_patch` call, and the patch names every file it adds,
+updates, deletes or moves to:
+
+| what changed on disk | status |
+|---|---|
+| exactly the files the patch named | `pass` |
+| any file the patch didn't name | **`fail`**, naming it |
+| a named file didn't change (the patch may have been rejected) | `unverified` |
+
+In `~/.codex/hooks.json` (everywhere) or `.codex/hooks.json` (a trusted
+project):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{ "matcher": "Bash|apply_patch",
+      "hooks": [{ "type": "command", "command": "custody-hook" }] }],
+    "PostToolUse": [{ "matcher": "Bash|apply_patch",
+      "hooks": [{ "type": "command", "command": "custody-hook" }] }]
+  }
+}
+```
+
+Codex runs a new or changed hook only after you trust it: review it with
+`/hooks`.
+
+### Cursor
+
+Cursor's before-hooks are permission checks, so `custody-hook` uses only
+its after-events and can never block or approve anything:
+
+- `afterFileEdit`: each edit's new text must be in the file on disk --
+  `pass`, or **`fail`** if any is missing. A pure deletion is `unverified`.
+- `postToolUse` for `Shell`: every file the command changed, against a
+  snapshot taken at `sessionStart` and refreshed after each event, so a
+  command only sees its own changes. Recorded, not judged (`unverified`),
+  like `Bash` above.
+
+In `.cursor/hooks.json` (a project) or `~/.cursor/hooks.json` (everywhere):
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{ "command": "custody-hook" }],
+    "afterFileEdit": [{ "command": "custody-hook" }],
+    "postToolUse": [{ "command": "custody-hook", "matcher": "Shell" }]
+  }
+}
+```
+
+Anything that edits files between two Cursor events (you, in the editor) is
+counted in the next shell command's changes.
+
+The Codex and Cursor hooks are tested against the event formats their
+documentation describes, not yet in a live session of either.
+
+### Aider
+
+Aider has no per-edit hooks. Wrap the whole run instead:
+
+```bash
+receipt run --task "fix the parser" --declare "src/*" -- aider --yes-always --message "fix the parser"
+```
 
 ## 3. Browser interactions: `capture()`
 
@@ -279,6 +350,7 @@ install of the built wheel that exercises all three commands.
 
 ## Not here yet
 
+- Codex and Cursor hooks have not yet been run in a live session.
 - Writes outside the watched directory (`/tmp`, `~`) aren't seen by
   `receipt run` -- that needs OS-level tracing, a separate project.
 - No network capture for shell commands, only for browser interactions.

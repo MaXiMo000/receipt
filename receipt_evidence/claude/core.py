@@ -125,6 +125,53 @@ def file_receipt(*, file_path: str, before_hash: str | None, after_hash: str | N
     }
 
 
+def edits_receipt(*, file_path: str, edits: list, disk_bytes: bytes | None) -> dict:
+    """Cursor's afterFileEdit: the edits it reports (old_string ->
+    new_string pairs) against the file's bytes afterwards. Each non-empty
+    new_string must be on disk. A deletion (empty new_string) can't be
+    confirmed from text alone, since the removed text may also appear
+    elsewhere in the file, so it is left unjudged rather than guessed."""
+    def result(status: str, detail: str) -> dict:
+        return {"declared_scope": [file_path], "status": status, "detail": detail,
+                "tool_reported_success": True}
+
+    if disk_bytes is None:
+        return result(UNVERIFIED, f"{file_path} does not exist after the edit")
+    try:
+        disk = _normalize(disk_bytes.decode("utf-8"))
+    except UnicodeDecodeError:
+        return result(UNVERIFIED, f"{file_path} is not UTF-8, so the edit text can't be compared")
+    added = [e.get("new_string") for e in edits if isinstance(e, dict)]
+    added = [_normalize(s) for s in added if isinstance(s, str) and s]
+    if not added:
+        return result(UNVERIFIED, "the edit reported no new text to look for (a deletion, or no edits)")
+    missing = sum(1 for s in added if s not in disk)
+    if missing:
+        return result(FAIL, f"{missing} of {len(added)} reported edit(s) are not in {file_path} on disk")
+    return result(PASS, f"all {len(added)} reported edit(s) are in {file_path} on disk")
+
+
+def patch_receipt(*, before: dict, after: dict, scope: list[str], diff_fn) -> dict:
+    """Codex's apply_patch: the patch names every file it adds, updates,
+    deletes or moves to. A change to any other file in the working
+    directory between the two hooks is a fail; exactly the named files
+    changing is a pass. A named file that didn't change may mean the patch
+    was rejected, which the hook can't see, so that stays unverified."""
+    changes = diff_fn(_drop_own_state(before), _drop_own_state(after))
+    touched = set(changes["added"] + changes["modified"] + changes["removed"] + changes["mode_changed"])
+    touched |= {p for r in changes["renamed"] for p in (r["from"], r["to"])}
+    outside = sorted(touched - set(scope))
+    untouched = sorted(set(scope) - touched)
+    if outside:
+        status, detail = FAIL, f"the patch named {len(scope)} file(s), but these also changed: {', '.join(outside)}"
+    elif untouched:
+        status, detail = UNVERIFIED, f"the patch named file(s) that did not change: {', '.join(untouched)}"
+    else:
+        status, detail = PASS, f"exactly the {len(scope)} file(s) the patch named changed"
+    return {"declared_scope": scope, "status": status, "detail": detail,
+            "changes": changes, "tool_reported_success": None}
+
+
 def _drop_own_state(files: dict[str, dict], prefix: str = ".custody/") -> dict[str, dict]:
     """A Bash snapshot of the cwd would otherwise see custody's own pending/
     receipt files from earlier tool calls in the same session and report

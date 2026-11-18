@@ -41,6 +41,7 @@ jobs:
       - run: python tests/test_providence.py
       - run: python tests/test_claude_core.py
       - run: python tests/test_claude_hook.py
+      - run: python tests/test_agent_hooks.py
       - run: python tests/test_ledger.py
       - run: python tests/test_browser.py
 
