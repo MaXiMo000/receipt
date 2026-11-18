@@ -18,9 +18,11 @@ found in a tamper-evident file you can hand to someone else.
 | an AI agent's file edit or shell command | the `custody-hook` hook, for Claude Code, Codex or Cursor | the bytes on disk are exactly what the tool says it wrote |
 | one browser interaction | `with capture(page): ...` (Playwright) | every network request it really made, and optionally the files it caused |
 
-Every receipt is JSON with a sha256 over its content -- the
-[Providence](PROVIDENCE_SPEC.md) shape -- and `providence check` tells you
-if one was edited after it was written.
+Every receipt is JSON with a sha256 over its content, chained into a
+ledger: `receipt verify receipts/` tells you if one was edited after it
+was written. Agent and browser receipts are also in the
+[Providence](PROVIDENCE_SPEC.md) shape, which `providence check` verifies
+on its own; `providence convert-receipt` converts a `receipt run` one.
 
 ```bash
 pip install receipt-evidence     # zero dependencies; installs `receipt`, `custody-hook`, `providence`
@@ -301,7 +303,7 @@ hold -- stops that, so verify with `--allowed-signers` whenever it matters.
 ## 6. On the pull request
 
 ```yaml
-- uses: MaXiMo000/receipt@v0.4.1
+- uses: MaXiMo000/receipt@v0.5.0
   with:
     directory: .custody/receipts          # where custody-hook wrote them
     allowed-signers: .github/allowed_signers
